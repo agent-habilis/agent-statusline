@@ -107,36 +107,27 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
   seg_git="${green_fg}${pill_left}${green_bg}${dark_fg} ${branch_icon} ${branch} ${reset}${green_fg}${pill_right}${reset}"
 fi
 
-# 6. Square nickname pill (only if connected to a square)
+# 6. Square pill — nickname + peer count, rendered if connected to a square.
+# The /square skill maintains a per-session state file at
+# /tmp/agent-square/sessions/<session_id>.json. We read square, nickname,
+# and peer_count from it, and verify the daemon is alive by connecting to
+# its unix socket (a leftover socket file after kill -9 would otherwise
+# trick us into showing a stale pill).
 seg_square=""
-nicknames_file="/tmp/agent-square/nicknames.json"
-square_nick=""
-square_peers=""
-square_worker="false"
-if [ -f "$nicknames_file" ] && [ -n "$claude_pid" ]; then
-  square_nick=$(jq -r --arg pid "$claude_pid" '.[$pid].nickname // empty' "$nicknames_file" 2>/dev/null)
-  square_peers=$(jq -r --arg pid "$claude_pid" '.[$pid].peers // 0' "$nicknames_file" 2>/dev/null)
-  square_worker=$(jq -r --arg pid "$claude_pid" '.[$pid].worker // false' "$nicknames_file" 2>/dev/null)
-fi
-# Fallback: use session_name from JSON input when nicknames file has no entry
-if [ -z "$square_nick" ]; then
-  session_name=$(echo "$input" | jq -r '.session_name // empty')
-  if [ -n "$session_name" ]; then
-    square_nick="$session_name"
-    square_peers=""
-  fi
-fi
-if [ -n "$square_nick" ]; then
-  if [ "$square_worker" = "true" ]; then
-    square_icon=$(printf '\xf3\xb0\x9a\xa9')  # nf-md-robot (U+F06A9)
-  else
-    square_icon=$(printf '\xf3\xb0\x97\x8b')  # 󰗋 nf-md-account-voice (U+F05CB)
-  fi
-  if [ -n "$square_peers" ]; then
-    peers_icon=$(printf '\xf3\xb0\xa1\x89')   # nf-md-account-group (U+F0849)
-    seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${square_nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peers_icon} ${square_peers} ${reset}${dorange_fg}${pill_right}${reset}"
-  else
-    seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${square_nick} ${reset}${orange_fg}${pill_right}${reset}"
+state_file="/tmp/agent-square/sessions/${claude_pid}.json"
+if [ -f "$state_file" ]; then
+  sq=$(jq -r '.square // empty' "$state_file" 2>/dev/null)
+  nick=$(jq -r '.nickname // empty' "$state_file" 2>/dev/null)
+  peers=$(jq -r '.peer_count // 0' "$state_file" 2>/dev/null)
+  if [ -n "$sq" ] && [ -n "$nick" ]; then
+    sq_prefix=$(echo "$sq" | cut -c1-16)
+    sock="/tmp/agent-square/${sq_prefix}-${nick}.sock"
+    if [ -S "$sock" ] && python3 -c "import socket,sys
+s=socket.socket(socket.AF_UNIX); s.settimeout(0.2); s.connect(sys.argv[1])" "$sock" 2>/dev/null; then
+      square_icon=$(printf '\xf3\xb0\x97\x8b')  # nf-md-account-voice (U+F05CB)
+      peer_icon=$(printf '\xf3\xb0\xa1\x89')    # nf-md-account-multiple-outline (U+F0849)
+      seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peer_icon} ${peers} ${reset}${dorange_fg}${pill_right}${reset}"
+    fi
   fi
 fi
 

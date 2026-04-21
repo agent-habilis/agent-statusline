@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PPID=29840 bash statusline.sh)"
+    ]
+  }
+}
