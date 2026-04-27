@@ -151,27 +151,22 @@ fi
 # 8. Room pill — room membership + nickname + peer count for the
 # /room plugin. The skill writes /tmp/room-skill/<room>/sessions/
 # <claude_pid>.json on create/join and erases it on leave. Peer count
-# is computed live from the channel JSONL: per-author latest record,
-# excluding records whose latest is `presence left`, minus self.
-# No daemon, so no liveness probe — file presence is the only signal.
+# is the number of other live session files; watch-room.js reaps stale
+# ones on each 30s tick so file presence is a reliable liveness signal.
 seg_room=""
 room_state_file=""
 for f in /tmp/room-skill/*/sessions/${claude_pid}.json; do
   [ -f "$f" ] && room_state_file="$f" && break
 done
 if [ -n "$room_state_file" ]; then
-  room_name=$(jq -r '.room // empty' "$room_state_file" 2>/dev/null)
-  room_nick=$(jq -r '.nickname // empty' "$room_state_file" 2>/dev/null)
-  room_channel=$(jq -r '.channel_file // empty' "$room_state_file" 2>/dev/null)
-  if [ -n "$room_name" ] && [ -n "$room_nick" ] && [ -f "$room_channel" ]; then
-    peer_count=$(jq -rs --arg me "$room_nick" '
-      group_by(.author)
-      | map(max_by(.ts))
-      | map(select(.author != $me))
-      | map(select(.kind != "presence" or (.meta.action // "") != "left"))
-      | length
-    ' "$room_channel" 2>/dev/null)
-    [ -z "$peer_count" ] && peer_count=0
+  { read -r room_name; read -r room_nick; read -r room_root; } < <(
+    jq -r '(.room // ""), (.nickname // ""), (.room_root // "")' \
+      "$room_state_file" 2>/dev/null
+  )
+  if [ -n "$room_name" ] && [ -n "$room_nick" ] && [ -n "$room_root" ]; then
+    peer_count=$(ls "${room_root}/${room_name}/sessions/" 2>/dev/null \
+      | grep -cv "^${claude_pid}\.json$")
+    peer_count=${peer_count:-0}
     room_icon=$(printf '\xf3\xb0\x80\x84')      # nf-md-account (U+F0004)
     peers_icon=$(printf '\xf3\xb0\xa1\x89')     # nf-md-account-multiple-outline (U+F0849)
     seg_room="${cyan_fg}${pill_left}${cyan_bg}${dark_fg} ${room_icon} ${room_nick} ${reset}${cyan_fg}${dcyan_bg}${pill_right}${reset}${dcyan_bg}${dark_fg} ${peers_icon} ${peer_count} ${room_name} ${reset}${dcyan_fg}${pill_right}${reset}"
