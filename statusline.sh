@@ -59,6 +59,10 @@ pink_bg='\033[48;2;243;139;168m'
 pink_fg='\033[38;2;243;139;168m'
 dpink_bg='\033[48;2;200;100;130m'
 dpink_fg='\033[38;2;200;100;130m'
+cyan_bg='\033[48;2;86;207;235m'
+cyan_fg='\033[38;2;86;207;235m'
+dcyan_bg='\033[48;2;60;158;180m'
+dcyan_fg='\033[38;2;60;158;180m'
 
 # --- Build segments ---
 
@@ -107,18 +111,20 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
   seg_git="${green_fg}${pill_left}${green_bg}${dark_fg} ${branch_icon} ${branch} ${reset}${green_fg}${pill_right}${reset}"
 fi
 
-# 6. Square pill — nickname + peer count, rendered if connected to a square.
-# The /square skill maintains a per-session state file at
+# 6. Square pill — nickname + participant count, rendered if connected to
+# a square. The agent-square daemon maintains a per-session state file at
 # /tmp/agent-square/sessions/<session_id>.json. We read square, nickname,
-# and peer_count from it, and verify the daemon is alive by connecting to
-# its unix socket (a leftover socket file after kill -9 would otherwise
-# trick us into showing a stale pill).
+# and participant_count from it, and verify the daemon is alive by
+# connecting to its unix socket (a leftover socket file after kill -9
+# would otherwise trick us into showing a stale pill).
+# participant_count is eventually consistent: ungracefully-exited peers
+# are evicted by the daemon's own sweeper within ~100s.
 seg_square=""
 state_file="/tmp/agent-square/sessions/${claude_pid}.json"
 if [ -f "$state_file" ]; then
   sq=$(jq -r '.square // empty' "$state_file" 2>/dev/null)
   nick=$(jq -r '.nickname // empty' "$state_file" 2>/dev/null)
-  peers=$(jq -r '.peer_count // 0' "$state_file" 2>/dev/null)
+  participants=$(jq -r '.participant_count // 0' "$state_file" 2>/dev/null)
   if [ -n "$sq" ] && [ -n "$nick" ]; then
     sq_prefix=$(echo "$sq" | cut -c1-16)
     sock="/tmp/agent-square/${sq_prefix}-${nick}.sock"
@@ -126,7 +132,7 @@ if [ -f "$state_file" ]; then
 s=socket.socket(socket.AF_UNIX); s.settimeout(0.2); s.connect(sys.argv[1])" "$sock" 2>/dev/null; then
       square_icon=$(printf '\xf3\xb0\x97\x8b')  # nf-md-account-voice (U+F05CB)
       peer_icon=$(printf '\xf3\xb0\xa1\x89')    # nf-md-account-multiple-outline (U+F0849)
-      seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peer_icon} ${peers} ${reset}${dorange_fg}${pill_right}${reset}"
+      seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peer_icon} ${participants} ${reset}${dorange_fg}${pill_right}${reset}"
     fi
   fi
 fi
@@ -142,13 +148,165 @@ if [ -f "$role_state_file" ] && [ -n "$claude_pid" ]; then
   fi
 fi
 
-# --- Render all segments ---
-# Note: COLUMNS/tput unavailable in statusline subprocess context.
-# Claude Code clips overflow, so render all segments and let it handle it.
+# 8. Room pill — room membership + nickname + peer count for the
+# /room plugin. The skill writes /tmp/room-skill/<room>/sessions/
+# <claude_pid>.json on create/join and erases it on leave. Peer count
+# is computed live from the channel JSONL: per-author latest record,
+# excluding records whose latest is `presence left`, minus self.
+# No daemon, so no liveness probe — file presence is the only signal.
+seg_room=""
+room_state_file=""
+for f in /tmp/room-skill/*/sessions/${claude_pid}.json; do
+  [ -f "$f" ] && room_state_file="$f" && break
+done
+if [ -n "$room_state_file" ]; then
+  room_name=$(jq -r '.room // empty' "$room_state_file" 2>/dev/null)
+  room_nick=$(jq -r '.nickname // empty' "$room_state_file" 2>/dev/null)
+  room_channel=$(jq -r '.channel_file // empty' "$room_state_file" 2>/dev/null)
+  if [ -n "$room_name" ] && [ -n "$room_nick" ] && [ -f "$room_channel" ]; then
+    peer_count=$(jq -rs --arg me "$room_nick" '
+      group_by(.author)
+      | map(max_by(.ts))
+      | map(select(.author != $me))
+      | map(select(.kind != "presence" or (.meta.action // "") != "left"))
+      | length
+    ' "$room_channel" 2>/dev/null)
+    [ -z "$peer_count" ] && peer_count=0
+    room_icon=$(printf '\xf3\xb0\x80\x84')      # nf-md-account (U+F0004)
+    peers_icon=$(printf '\xf3\xb0\xa1\x89')     # nf-md-account-multiple-outline (U+F0849)
+    seg_room="${cyan_fg}${pill_left}${cyan_bg}${dark_fg} ${room_icon} ${room_nick} ${reset}${cyan_fg}${dcyan_bg}${pill_right}${reset}${dcyan_bg}${dark_fg} ${peers_icon} ${peer_count} ${room_name} ${reset}${dcyan_fg}${pill_right}${reset}"
+  fi
+fi
 
+# --- Render all segments ---
+# Claude Code runs the statusline subprocess without a controlling
+# terminal, so $COLUMNS / tput / /dev/tty are all unavailable here.
+# But Claude Code itself does have a tty — we can walk up the process
+# tree to find its tty and read the viewport size from there.
+# $STATUSLINE_DEBUG_COLS wins for tests.
+cols="${STATUSLINE_DEBUG_COLS:-}"
+cols_source="env"
+cols_tty=""
+if [ -z "$cols" ]; then
+  cols_source="fallback"
+  pid=$PPID
+  for _ in 1 2 3 4 5 6; do
+    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ -n "$tty" ] && [ "$tty" != "?" ] && [ "$tty" != "??" ] && [ -r "/dev/$tty" ]; then
+      cols=$(stty size < "/dev/$tty" 2>/dev/null | awk '{print $2}')
+      if [ -n "$cols" ]; then
+        cols_source="tty"
+        cols_tty="/dev/$tty"
+        break
+      fi
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -z "$pid" ] || [ "$pid" -le 1 ] && break
+  done
+fi
+if [ -z "$cols" ] || ! [ "$cols" -gt 0 ] 2>/dev/null; then
+  cols=120
+  cols_source="fallback"
+fi
+
+# Claude Code reserves a right-edge gutter for its own UI chrome (the
+# rounded box around the input area extends past where the statusline
+# stops). The pty width from stty is the full terminal viewport; the
+# actually paintable area for the statusline is narrower. Subtracting
+# 4 cols matches the observed clipping point in Ghostty.
+cols=$((cols - 4))
+[ "$cols" -lt 20 ] && cols=20
+
+# Printable widths and stripped strings for all segments in one python
+# call (process spawn is the dominant cost on a statusline). Our segments
+# embed ANSI escapes as literal `\033[...m` sequences (interpreted only
+# by the final `echo -e`), so we strip both the literal form and real
+# ESC-CSI bytes, then count Unicode codepoints. Nerd Font / Powerline
+# glyphs are single-width in modern terminals. We separate segments on
+# the wire with U+001E (Record Separator), and each line emits
+# "<width>\x1f<stripped>" so we can preserve the stripped string for
+# debug logging without a second python invocation.
+seg_data=$(printf '%s\x1e' "$seg_model" "$seg_rate" "$seg_dir" "$seg_role" "$seg_square" "$seg_room" "$seg_git" | python3 -c '
+import re, sys
+esc = re.compile(r"\\033\[[0-9;]*m|\x1b\[[0-9;]*m")
+data = sys.stdin.read()
+parts = data.split("\x1e")
+# printf leaves a trailing sep, so drop the empty last element.
+if parts and parts[-1] == "":
+    parts.pop()
+for p in parts:
+    stripped = esc.sub("", p)
+    sys.stdout.write(f"{len(stripped)}\x1f{stripped}\n")
+')
+# Split newline-separated records into parallel arrays (bash 3.2-compatible).
+seg_widths=()
+seg_stripped=()
+while IFS= read -r line; do
+  seg_widths+=("${line%%$'\x1f'*}")
+  seg_stripped+=("${line#*$'\x1f'}")
+done <<< "$seg_data"
+
+seg_names=(model rate dir role square room git)
 output="$seg_model"
-for seg in "$seg_rate" "$seg_dir" "$seg_role" "$seg_square" "$seg_git"; do
-  [ -n "$seg" ] && output="${output} ${seg}"
+used="${seg_widths[0]}"
+included=("model")
+dropped=()
+i=1
+for seg in "$seg_rate" "$seg_dir" "$seg_role" "$seg_square" "$seg_room" "$seg_git"; do
+  name="${seg_names[i]}"
+  w="${seg_widths[i]}"
+  i=$((i + 1))
+  [ -z "$seg" ] && continue
+  # +1 for the space separator
+  if [ $((used + 1 + w)) -le "$cols" ]; then
+    output="${output} ${seg}"
+    used=$((used + 1 + w))
+    included+=("$name")
+  else
+    dropped+=("$name")
+    break
+  fi
 done
 
 echo -e "$output"
+
+# Diagnostic logging — gated behind STATUSLINE_DEBUG. Zero overhead when off.
+# Writes one JSON record per render to /tmp/statusline-debug.log (override
+# with STATUSLINE_DEBUG_LOG). Use to investigate width/cols mismatches.
+if [ -n "$STATUSLINE_DEBUG" ]; then
+  debug_log="${STATUSLINE_DEBUG_LOG:-/tmp/statusline-debug.log}"
+  ts=$(python3 -c 'import time; print(int(time.time()*1000))')
+  jq -nc \
+    --argjson ts "$ts" \
+    --argjson cols "$cols" \
+    --arg cols_source "$cols_source" \
+    --arg cols_tty "$cols_tty" \
+    --argjson total "$used" \
+    --arg names "${seg_names[*]}" \
+    --arg widths "${seg_widths[*]}" \
+    --arg included "${included[*]}" \
+    --arg dropped "${dropped[*]}" \
+    --arg s_model "${seg_stripped[0]}" \
+    --arg s_rate "${seg_stripped[1]}" \
+    --arg s_dir "${seg_stripped[2]}" \
+    --arg s_role "${seg_stripped[3]}" \
+    --arg s_square "${seg_stripped[4]}" \
+    --arg s_room "${seg_stripped[5]}" \
+    --arg s_git "${seg_stripped[6]}" \
+    '{
+      ts: $ts,
+      cols: $cols,
+      cols_source: $cols_source,
+      cols_tty: (if $cols_tty == "" then null else $cols_tty end),
+      total: $total,
+      included: ($included | split(" ") | map(select(. != ""))),
+      dropped: ($dropped | split(" ") | map(select(. != ""))),
+      segs: [
+        ($names | split(" ")) as $n
+        | ($widths | split(" ")) as $w
+        | [$s_model, $s_rate, $s_dir, $s_role, $s_square, $s_room, $s_git] as $r
+        | range(0; $n | length)
+        | {name: $n[.], width: ($w[.] | tonumber), rendered: $r[.]}
+      ]
+    }' >> "$debug_log"
+fi
