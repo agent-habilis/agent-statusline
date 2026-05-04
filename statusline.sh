@@ -4,7 +4,38 @@ input=$(cat)
 # Data extraction
 model=$(echo "$input" | jq -r '.model.display_name // "..."' | sed 's/ ([^)]*context)//')
 context_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
-current_dir=$(echo "$input" | jq -r '.workspace.current_dir // "..."' | xargs basename)
+workspace_dir=$(echo "$input" | jq -r '.workspace.current_dir // "..."')
+# Fish-style contraction: parents shrink to 1 char (dotfiles 2), leaf full.
+if [ "$workspace_dir" = "..." ] || [ "$workspace_dir" = "/" ]; then
+  current_dir="$workspace_dir"
+else
+  if [ "$workspace_dir" = "$HOME" ]; then
+    current_dir="~"
+  else
+    case "$workspace_dir" in
+      "$HOME"/*) contract_dir="~/${workspace_dir#$HOME/}" ;;
+      *)         contract_dir="$workspace_dir" ;;
+    esac
+    IFS=/ read -ra _parts <<< "$contract_dir"
+    _last=$((${#_parts[@]} - 1))
+    current_dir=""
+    for _i in "${!_parts[@]}"; do
+      _p="${_parts[$_i]}"
+      if [ "$_i" -eq "$_last" ] || [ -z "$_p" ]; then
+        _seg="$_p"
+      elif [[ "$_p" == .?* ]]; then
+        _seg="${_p:0:2}"
+      else
+        _seg="${_p:0:1}"
+      fi
+      if [ "$_i" -eq 0 ]; then
+        current_dir="$_seg"
+      else
+        current_dir="${current_dir}/${_seg}"
+      fi
+    done
+  fi
+fi
 rate_5h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | cut -d. -f1)
 rate_7d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
 session_id=$(echo "$input" | jq -r '.session_id // "..."')
@@ -76,7 +107,6 @@ seg_dir="${blue_fg}${pill_left}${blue_bg}${dark_fg} ${dir_icon} ${current_dir} $
 seg_rate="${purple_fg}${pill_left}${purple_bg}${dark_fg} ${gauge_icon} 5h ${rate_5h}% ${reset}${purple_fg}${dpurple_bg}${pill_right}${reset}${dpurple_bg}${dark_fg} ${gauge_low_icon} 7d ${rate_7d}% ${reset}${dpurple_fg}${pill_right}${reset}"
 
 # 4. Tokens pill (session all-time in/out tokens)
-workspace_dir=$(echo "$input" | jq -r '.workspace.current_dir // ""')
 project_key=$(echo "$workspace_dir" | sed 's|/|-|g')
 session_jsonl="$HOME/.claude/projects/${project_key}/${session_id}.jsonl"
 token_display="..."
@@ -221,7 +251,7 @@ cols=$((cols - 4))
 # the wire with U+001E (Record Separator), and each line emits
 # "<width>\x1f<stripped>" so we can preserve the stripped string for
 # debug logging without a second python invocation.
-seg_data=$(printf '%s\x1e' "$seg_model" "$seg_rate" "$seg_dir" "$seg_role" "$seg_square" "$seg_room" "$seg_git" | python3 -c '
+seg_data=$(printf '%s\x1e' "$seg_dir" "$seg_model" "$seg_rate" "$seg_role" "$seg_square" "$seg_room" "$seg_git" | python3 -c '
 import re, sys
 esc = re.compile(r"\\033\[[0-9;]*m|\x1b\[[0-9;]*m")
 data = sys.stdin.read()
@@ -241,13 +271,13 @@ while IFS= read -r line; do
   seg_stripped+=("${line#*$'\x1f'}")
 done <<< "$seg_data"
 
-seg_names=(model rate dir role square room git)
-output="$seg_model"
+seg_names=(dir model rate role square room git)
+output="$seg_dir"
 used="${seg_widths[0]}"
-included=("model")
+included=("dir")
 dropped=()
 i=1
-for seg in "$seg_rate" "$seg_dir" "$seg_role" "$seg_square" "$seg_room" "$seg_git"; do
+for seg in "$seg_model" "$seg_rate" "$seg_role" "$seg_square" "$seg_room" "$seg_git"; do
   name="${seg_names[i]}"
   w="${seg_widths[i]}"
   i=$((i + 1))
@@ -281,9 +311,9 @@ if [ -n "$STATUSLINE_DEBUG" ]; then
     --arg widths "${seg_widths[*]}" \
     --arg included "${included[*]}" \
     --arg dropped "${dropped[*]}" \
-    --arg s_model "${seg_stripped[0]}" \
-    --arg s_rate "${seg_stripped[1]}" \
-    --arg s_dir "${seg_stripped[2]}" \
+    --arg s_dir "${seg_stripped[0]}" \
+    --arg s_model "${seg_stripped[1]}" \
+    --arg s_rate "${seg_stripped[2]}" \
     --arg s_role "${seg_stripped[3]}" \
     --arg s_square "${seg_stripped[4]}" \
     --arg s_room "${seg_stripped[5]}" \
@@ -299,7 +329,7 @@ if [ -n "$STATUSLINE_DEBUG" ]; then
       segs: [
         ($names | split(" ")) as $n
         | ($widths | split(" ")) as $w
-        | [$s_model, $s_rate, $s_dir, $s_role, $s_square, $s_room, $s_git] as $r
+        | [$s_dir, $s_model, $s_rate, $s_role, $s_square, $s_room, $s_git] as $r
         | range(0; $n | length)
         | {name: $n[.], width: ($w[.] | tonumber), rendered: $r[.]}
       ]
