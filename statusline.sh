@@ -178,28 +178,52 @@ if [ -f "$role_state_file" ] && [ -n "$claude_pid" ]; then
   fi
 fi
 
-# 8. Room pill — room membership + nickname + peer count for the
-# /room plugin. The skill writes /tmp/room-skill/<room>/sessions/
-# <claude_pid>.json on create/join and erases it on leave. Peer count
-# is the number of other live session files; watch-room.js reaps stale
-# ones on each 30s tick so file presence is a reliable liveness signal.
+# 8. Room pill — room membership + nickname + member count for the
+# /room plugin. Reader contract is plugins/room/AGENTS.md "Public
+# reader contract": the sessions/ directory is stable, the filename
+# grammar (host-pid-monitor) is NOT — read the file rather than
+# parsing the name. Member count comes from `--action list`, which
+# applies the 90s heartbeat TTL and reaps stale entries. The node
+# spawn is ~50ms, so the count is cached for COUNT_TTL seconds and
+# the cached file is the only thing read on most renders.
 seg_room=""
-room_state_file=""
-for f in /tmp/room-skill/*/sessions/${claude_pid}.json; do
-  [ -f "$f" ] && room_state_file="$f" && break
+room_v=""
+room_name=""
+room_nick=""
+room_root=""
+for f in /tmp/room-skill/*/sessions/*.json; do
+  [ -f "$f" ] || continue
+  out=$(jq -r --argjson pid "$claude_pid" \
+    'select((.pid // -1) == $pid) | "\(.v // "")\t\(.room // "")\t\(.nickname // "")\t\(.room_root // "")"' \
+    "$f" 2>/dev/null)
+  if [ -n "$out" ]; then
+    IFS=$'\t' read -r room_v room_name room_nick room_root <<<"$out"
+    break
+  fi
 done
-if [ -n "$room_state_file" ]; then
-  { read -r room_name; read -r room_nick; read -r room_root; } < <(
-    jq -r '(.room // ""), (.nickname // ""), (.room_root // "")' \
-      "$room_state_file" 2>/dev/null
-  )
+if [ -n "$room_name" ]; then
+  case "$room_v" in 1.*) ;; *) room_name="" ;; esac
   if [ -n "$room_name" ] && [ -n "$room_nick" ] && [ -n "$room_root" ]; then
-    peer_count=$(ls "${room_root}/${room_name}/sessions/" 2>/dev/null \
-      | grep -cv "^${claude_pid}\.json$")
-    peer_count=${peer_count:-0}
+    cache_dir="/tmp/statusline-cache"
+    cache_file="${cache_dir}/room-${claude_pid}.count"
+    count_ttl=2
+    member_count=""
+    if [ -f "$cache_file" ]; then
+      cache_age=$(( $(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || echo 0) ))
+      [ "$cache_age" -lt "$count_ttl" ] && member_count=$(cat "$cache_file" 2>/dev/null)
+    fi
+    if [ -z "$member_count" ]; then
+      mkdir -p "$cache_dir" 2>/dev/null
+      member_count=$(node /Users/caiogondim/Developer/upgrade/llm-context/plugins/room/src/session-state.js \
+        --action list --room "$room_name" --path "$room_root" 2>/dev/null \
+        | grep '"event":"peers_listed"' | tail -1 \
+        | jq '.peers | length' 2>/dev/null)
+      member_count=${member_count:-0}
+      printf '%s' "$member_count" > "$cache_file" 2>/dev/null
+    fi
     room_icon=$(printf '\xf3\xb0\x80\x84')      # nf-md-account (U+F0004)
     peers_icon=$(printf '\xf3\xb0\xa1\x89')     # nf-md-account-multiple-outline (U+F0849)
-    seg_room="${cyan_fg}${pill_left}${cyan_bg}${dark_fg} ${room_icon} ${room_nick} ${reset}${cyan_fg}${dcyan_bg}${pill_right}${reset}${dcyan_bg}${dark_fg} ${peers_icon} ${peer_count} ${room_name} ${reset}${dcyan_fg}${pill_right}${reset}"
+    seg_room="${cyan_fg}${pill_left}${cyan_bg}${dark_fg} ${room_icon} ${room_nick} ${reset}${cyan_fg}${dcyan_bg}${pill_right}${reset}${dcyan_bg}${dark_fg} ${peers_icon} ${member_count} ${room_name} ${reset}${dcyan_fg}${pill_right}${reset}"
   fi
 fi
 
