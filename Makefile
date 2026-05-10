@@ -17,6 +17,9 @@ install:
 		echo "Backed up existing statusline.sh to $$backup"; \
 	fi
 
+	@# Ensure source script is executable
+	@chmod +x "$(STATUSLINE_SRC)"
+
 	@# Create symlink
 	@ln -sf "$(STATUSLINE_SRC)" "$(STATUSLINE_DST)"
 	@echo "Symlinked $(STATUSLINE_DST) -> $(STATUSLINE_SRC)"
