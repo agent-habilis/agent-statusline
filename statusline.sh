@@ -141,29 +141,29 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
   seg_git="${green_fg}${pill_left}${green_bg}${dark_fg} ${branch_icon} ${branch} ${reset}${green_fg}${pill_right}${reset}"
 fi
 
-# 6. Square pill — nickname + participant count, rendered if connected to
-# a square. The agent-square daemon maintains a per-session state file at
-# /tmp/agent-square/sessions/<session_id>.json. We read square, nickname,
-# and participant_count from it, and verify the daemon is alive by
-# connecting to its unix socket (a leftover socket file after kill -9
-# would otherwise trick us into showing a stale pill).
-# participant_count is eventually consistent: ungracefully-exited peers
-# are evicted by the daemon's own sweeper within ~100s.
-seg_square=""
-state_file="/tmp/agent-square/sessions/${claude_pid}.json"
-if [ -f "$state_file" ]; then
-  sq=$(jq -r '.square // empty' "$state_file" 2>/dev/null)
-  nick=$(jq -r '.nickname // empty' "$state_file" 2>/dev/null)
-  participants=$(jq -r '.participant_count // 0' "$state_file" 2>/dev/null)
-  if [ -n "$sq" ] && [ -n "$nick" ]; then
-    sq_prefix=$(echo "$sq" | cut -c1-16)
-    sock="/tmp/agent-square/${sq_prefix}-${nick}.sock"
-    if [ -S "$sock" ] && python3 -c "import socket,sys
-s=socket.socket(socket.AF_UNIX); s.settimeout(0.2); s.connect(sys.argv[1])" "$sock" 2>/dev/null; then
-      square_icon=$(printf '\xf3\xb0\x97\x8b')  # nf-md-account-voice (U+F05CB)
-      peer_icon=$(printf '\xf3\xb0\xa1\x89')    # nf-md-account-multiple-outline (U+F0849)
-      seg_square="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${square_icon} ${nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peer_icon} ${participants} ${reset}${dorange_fg}${pill_right}${reset}"
-    fi
+# 6. Swarm pill — nickname (light) + name peer-count (dark) for
+# agent-habilis-swarm. The /swarm:* skills and the daemon share one
+# per-session file at /tmp/agent-habilis-swarm/sessions/<claude_pid>.json
+# (skills write nickname/name, daemon merges participant_count). The
+# daemon refreshes last_updated every STATE_REFRESH_SECS (~10s) even
+# when membership is unchanged, so a fresh timestamp == alive — this
+# replaces the old unix-socket probe (one fewer subprocess per render).
+# Keep the staleness window ~3x that cadence; it is coupled to
+# STATE_REFRESH_SECS in agent-swarm's src/tuning.rs.
+seg_swarm=""
+swarm_state_file="/tmp/agent-habilis-swarm/sessions/${claude_pid}.json"
+if [ -f "$swarm_state_file" ]; then
+  { read -r sw_nick; read -r sw_name; read -r sw_peers; read -r sw_updated; } < <(
+    jq -r '(.nickname // ""), (.name // ""), (.participant_count // 0), (.last_updated // 0)' \
+      "$swarm_state_file" 2>/dev/null
+  )
+  now=$(date +%s)
+  if [ -n "$sw_nick" ] && [ -n "$sw_name" ] \
+     && [ "$sw_updated" -gt 0 ] 2>/dev/null \
+     && [ $((now - sw_updated)) -lt 30 ]; then
+    swarm_icon=$(printf '\xf3\xb0\x97\x8b')   # nf-md-account-voice (U+F05CB)
+    peer_icon=$(printf '\xf3\xb0\xa1\x89')    # nf-md-account-multiple-outline (U+F0849)
+    seg_swarm="${orange_fg}${pill_left}${orange_bg}${dark_fg} ${swarm_icon} ${sw_nick} ${reset}${orange_fg}${dorange_bg}${pill_right}${reset}${dorange_bg}${dark_fg} ${peer_icon} ${sw_name} ${sw_peers} ${reset}${dorange_fg}${pill_right}${reset}"
   fi
 fi
 
@@ -251,7 +251,7 @@ cols=$((cols - 4))
 # the wire with U+001E (Record Separator), and each line emits
 # "<width>\x1f<stripped>" so we can preserve the stripped string for
 # debug logging without a second python invocation.
-seg_data=$(printf '%s\x1e' "$seg_dir" "$seg_model" "$seg_rate" "$seg_role" "$seg_square" "$seg_room" "$seg_git" | python3 -c '
+seg_data=$(printf '%s\x1e' "$seg_dir" "$seg_model" "$seg_rate" "$seg_role" "$seg_swarm" "$seg_room" "$seg_git" | python3 -c '
 import re, sys
 esc = re.compile(r"\\033\[[0-9;]*m|\x1b\[[0-9;]*m")
 data = sys.stdin.read()
@@ -271,13 +271,13 @@ while IFS= read -r line; do
   seg_stripped+=("${line#*$'\x1f'}")
 done <<< "$seg_data"
 
-seg_names=(dir model rate role square room git)
+seg_names=(dir model rate role swarm room git)
 output="$seg_dir"
 used="${seg_widths[0]}"
 included=("dir")
 dropped=()
 i=1
-for seg in "$seg_model" "$seg_rate" "$seg_role" "$seg_square" "$seg_room" "$seg_git"; do
+for seg in "$seg_model" "$seg_rate" "$seg_role" "$seg_swarm" "$seg_room" "$seg_git"; do
   name="${seg_names[i]}"
   w="${seg_widths[i]}"
   i=$((i + 1))
@@ -315,7 +315,7 @@ if [ -n "$STATUSLINE_DEBUG" ]; then
     --arg s_model "${seg_stripped[1]}" \
     --arg s_rate "${seg_stripped[2]}" \
     --arg s_role "${seg_stripped[3]}" \
-    --arg s_square "${seg_stripped[4]}" \
+    --arg s_swarm "${seg_stripped[4]}" \
     --arg s_room "${seg_stripped[5]}" \
     --arg s_git "${seg_stripped[6]}" \
     '{
@@ -329,7 +329,7 @@ if [ -n "$STATUSLINE_DEBUG" ]; then
       segs: [
         ($names | split(" ")) as $n
         | ($widths | split(" ")) as $w
-        | [$s_dir, $s_model, $s_rate, $s_role, $s_square, $s_room, $s_git] as $r
+        | [$s_dir, $s_model, $s_rate, $s_role, $s_swarm, $s_room, $s_git] as $r
         | range(0; $n | length)
         | {name: $n[.], width: ($w[.] | tonumber), rendered: $r[.]}
       ]
