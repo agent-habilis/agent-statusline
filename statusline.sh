@@ -143,15 +143,15 @@ fi
 
 # 6. Swarm pill — nickname (light) + name peer-count (dark) for
 # agent-habilis-swarm. The /swarm:* skills and the daemon share one
-# per-session file at /tmp/agent-habilis-swarm/sessions/<claude_pid>.json
+# per-session file at /tmp/agent-habilis/swarm/sessions/<claude_pid>.json
 # (skills write nickname/name, daemon merges participant_count). The
 # daemon refreshes last_updated every STATE_REFRESH_SECS (~10s) even
 # when membership is unchanged, so a fresh timestamp == alive — this
 # replaces the old unix-socket probe (one fewer subprocess per render).
 # Keep the staleness window ~3x that cadence; it is coupled to
-# STATE_REFRESH_SECS in agent-swarm's src/tuning.rs.
+# STATE_REFRESH_SECS in agent-swarm's src/util/tuning.rs.
 seg_swarm=""
-swarm_state_file="/tmp/agent-habilis-swarm/sessions/${claude_pid}.json"
+swarm_state_file="/tmp/agent-habilis/swarm/sessions/${claude_pid}.json"
 if [ -f "$swarm_state_file" ]; then
   { read -r sw_nick; read -r sw_name; read -r sw_peers; read -r sw_updated; } < <(
     jq -r '(.nickname // ""), (.name // ""), (.participant_count // 0), (.last_updated // 0)' \
