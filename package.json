@@ -1,0 +1,11 @@
+{
+  "name": "@agent-habilis/claude-code-statusline",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "A powerline-style statusline for Claude Code.",
+  "scripts": {
+    "cc:install": "bun run scripts/cc-install.ts",
+    "cc:uninstall": "bun run scripts/cc-uninstall.ts"
+  }
+}
