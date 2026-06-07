@@ -8,6 +8,7 @@ Displays model, context usage, rate limits, token counts, git branch, and more â
 
 ## Prerequisites
 
+- [Bun](https://bun.sh/) (to run the install/uninstall scripts)
 - [jq](https://jqlang.github.io/jq/)
 - python3
 - A [Nerd Font](https://www.nerdfonts.com/) (for powerline glyphs and icons)
@@ -17,7 +18,7 @@ Displays model, context usage, rate limits, token counts, git branch, and more â
 ```sh
 git clone git@github.com:agent-habilis/claude-code-statusline.git
 cd claude-code-statusline
-make install
+bun run cc:install
 ```
 
 This symlinks `statusline.sh` into `~/.claude/` and adds the `statusLine` config to your `~/.claude/settings.json`.
@@ -25,7 +26,7 @@ This symlinks `statusline.sh` into `~/.claude/` and adds the `statusLine` config
 ## Uninstall
 
 ```sh
-make uninstall
+bun run cc:uninstall
 ```
 
 ## Development
