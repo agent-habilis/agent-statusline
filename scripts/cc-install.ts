@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
-// cc-install.ts — symlink statusline.sh into ~/.claude/ and register the
+// cc-install.ts — symlink statusline.ts into ~/.claude/ and register the
 // statusLine config in ~/.claude/settings.json.
 import * as fs from 'node:fs';
 
 const REPO = decodeURIComponent(new URL('../', import.meta.url).pathname);
-const SRC = `${REPO}statusline.sh`;
+const SRC = `${REPO}statusline.ts`;
 const CLAUDE_DIR = `${process.env.HOME}/.claude`;
-const DST = `${CLAUDE_DIR}/statusline.sh`;
+const DST = `${CLAUDE_DIR}/statusline.ts`;
 const SETTINGS = `${CLAUDE_DIR}/settings.json`;
 
-const STATUSLINE = { type: 'command', command: '~/.claude/statusline.sh', padding: 0 };
+const STATUSLINE = { type: 'command', command: '~/.claude/statusline.ts', padding: 0 };
 
 function timestamp() {
   const d = new Date();
@@ -26,7 +26,7 @@ try {
   if (!stat.isSymbolicLink()) {
     const backup = `${DST}.bak.${timestamp()}`;
     fs.copyFileSync(DST, backup);
-    console.log(`Backed up existing statusline.sh to ${backup}`);
+    console.log(`Backed up existing statusline.ts to ${backup}`);
   }
 } catch (err: any) {
   if (err.code !== 'ENOENT') throw err;
@@ -43,6 +43,17 @@ try {
 }
 fs.symlinkSync(SRC, DST);
 console.log(`Symlinked ${DST} -> ${SRC}`);
+
+// Clean up the legacy statusline.sh symlink from before the Bun rewrite.
+const legacy = `${CLAUDE_DIR}/statusline.sh`;
+try {
+  if (fs.lstatSync(legacy).isSymbolicLink()) {
+    fs.unlinkSync(legacy);
+    console.log(`Removed legacy symlink ${legacy}`);
+  }
+} catch (err: any) {
+  if (err.code !== 'ENOENT') throw err;
+}
 
 // Add statusLine config to settings.json.
 const file = Bun.file(SETTINGS);
