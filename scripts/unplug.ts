@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// cc-uninstall.ts — remove the statusline.ts symlink and the statusLine config
+// unplug.ts — remove the statusline.ts symlink and the statusLine config
 // from ~/.claude/settings.json.
 import * as fs from 'node:fs';
 

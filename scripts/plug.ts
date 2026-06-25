@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// cc-install.ts — symlink statusline.ts into ~/.claude/ and register the
+// plug.ts — symlink statusline.ts into ~/.claude/ and register the
 // statusLine config in ~/.claude/settings.json.
 import * as fs from 'node:fs';
 

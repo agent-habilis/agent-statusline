@@ -16,7 +16,7 @@ Displays model, context usage, rate limits, git branch, and more — directly in
 ```sh
 git clone git@github.com:agent-habilis/claude-code-statusline.git
 cd claude-code-statusline
-bun run cc:install
+bun run plug
 ```
 
 This symlinks `statusline.ts` into `~/.claude/` and adds the `statusLine` config to your `~/.claude/settings.json`.
@@ -24,9 +24,9 @@ This symlinks `statusline.ts` into `~/.claude/` and adds the `statusLine` config
 ## Uninstall
 
 ```sh
-bun run cc:uninstall
+bun run unplug
 ```
 
 ## Development
 
-Since `bun run cc:install` creates a symlink, any edits you make to `statusline.ts` in this repo are picked up automatically on the next Claude Code interaction. No copy or restart needed.
+Since `bun run plug` creates a symlink, any edits you make to `statusline.ts` in this repo are picked up automatically on the next Claude Code interaction. No copy or restart needed.

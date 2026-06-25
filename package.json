@@ -5,7 +5,7 @@
   "private": true,
   "description": "A powerline-style statusline for Claude Code.",
   "scripts": {
-    "cc:install": "bun run scripts/cc-install.ts",
-    "cc:uninstall": "bun run scripts/cc-uninstall.ts"
+    "plug": "bun run scripts/plug.ts",
+    "unplug": "bun run scripts/unplug.ts"
   }
 }
