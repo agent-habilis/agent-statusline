@@ -73,6 +73,65 @@ function readProcessField(field: string, processId: string): string {
   }
 }
 
+// Locate the swarm state file the daemon launched without `--state-file`
+// writes by default: `/tmp/agent-habilis/swarm/<swarm_prefix>/<nick>.state.json`.
+// The filename is keyed by swarm+nick, not by PID, so find THIS session's file
+// via the daemon process: the `ahsw` daemon is a descendant of the Claude Code
+// process and holds its socket + tracing log open beside the state file in that
+// same per-swarm directory (`<nick>.ipc.sock` / `<nick>.tracing.log`). Find the
+// daemon under our process tree, read an open name off `lsof`, and swap the
+// extension for `.state.json`. Best-effort: returns null if anything is missing
+// or the session is not in a swarm (and skips `lsof` entirely in that case).
+function findSwarmStatePath(processId: string): string | null {
+  try {
+    const psOutput = Bun.spawnSync(['ps', '-axo', 'pid=,ppid=,command='], { stderr: 'ignore' })
+      .stdout.toString();
+    const parentOf = new Map<string, string>();
+    const ahswPids: string[] = [];
+    for (const line of psOutput.split('\n')) {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+      if (!match) continue;
+      const [, pid, ppid, command] = match;
+      parentOf.set(pid, ppid);
+      if (/(^|\/)ahsw\s/.test(command)) ahswPids.push(pid);
+    }
+
+    // An `ahsw` daemon is ours if the Claude Code process is an ancestor within
+    // a few hops (claude → zsh → ahsw). Walk each candidate's parent chain up.
+    let ahswPid = '';
+    for (const candidate of ahswPids) {
+      let ancestor = candidate;
+      for (let depth = 0; depth < 4 && ancestor; depth++) {
+        ancestor = parentOf.get(ancestor) ?? '';
+        if (ancestor === processId) {
+          ahswPid = candidate;
+          break;
+        }
+      }
+      if (ahswPid) break;
+    }
+    if (!ahswPid) return null;
+
+    // The daemon holds its socket and tracing log open in the per-swarm
+    // directory beside the state file, sharing the `<nick>` stem. `lsof -Fn`
+    // prints each open name on an `n…` line; normalize macOS's `/private/tmp`
+    // alias to `/tmp`, then derive the state file from the directory + stem.
+    const lsofOutput = Bun.spawnSync(['lsof', '-p', ahswPid, '-Fn'], { stderr: 'ignore' })
+      .stdout.toString();
+    for (const line of lsofOutput.split('\n')) {
+      if (!line.startsWith('n')) continue;
+      const name = line.slice(1).replace(/^\/private\/tmp\//, '/tmp/');
+      const match = name.match(
+        /^(\/tmp\/agent-habilis\/swarm\/[^/]+)\/(.+)\.(?:ipc\.sock|tracing\.log)$/,
+      );
+      if (match) return `${match[1]}/${match[2]}.state.json`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Live member count for a /room room, via the plugin's public reader contract
 // (plugins/room/AGENTS.md). `session-state.js --action list` applies the 90s
 // heartbeat TTL, reaps stale entries, and counts self — none of which the
@@ -194,15 +253,25 @@ try {
 }
 
 // ── Segment: swarm membership ────────────────────────────────────────
-// The agent-habilis-swarm daemon is the sole writer of this per-session file;
-// the /swarm:* skills only read it. The daemon refreshes last_updated every
+// The agent-habilis-swarm daemon is the sole writer of its state file; the
+// /swarm:* skills only read it. The daemon refreshes last_updated every
 // STATE_REFRESH_SECS (~10s) even when membership is unchanged, so a fresh
 // timestamp doubles as a liveness signal. The staleness window below is kept
 // at ~3x that cadence and is coupled to STATE_REFRESH_SECS in
 // agent-habilis-swarm's src/util/tuning.rs.
+//
+// Two launch styles exist: a daemon started with `--state-file
+// .../sessions/${PPID}.json` writes that per-session path (cheap to read by
+// our own PPID), while one started without it writes a default
+// `.../<swarm_prefix>/<nick>.state.json`. Prefer the PPID file, then fall back
+// to locating the default file via the daemon process (findSwarmStatePath).
 const SWARM_STALENESS_SECONDS = 30;
 let swarmSegment = '';
-const swarmState = readJsonFile(`/tmp/agent-habilis/swarm/sessions/${claudeProcessId}.json`);
+let swarmState = readJsonFile(`/tmp/agent-habilis/swarm/sessions/${claudeProcessId}.json`);
+if (!swarmState) {
+  const defaultPath = findSwarmStatePath(claudeProcessId);
+  if (defaultPath) swarmState = readJsonFile(defaultPath);
+}
 if (swarmState) {
   const swarmNickname = String(swarmState.nickname ?? '');
   const swarmName = String(swarmState.name ?? '');
