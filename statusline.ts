@@ -393,14 +393,28 @@ availableColumns = Math.max(availableColumns - GUTTER_COLUMNS, MINIMUM_COLUMNS);
 // and dropped once the next one would overflow. Widths count Unicode
 // codepoints after stripping ANSI, since Nerd Font / Powerline glyphs render
 // single-width in modern terminals.
-const segmentNames = ['dir', 'model', 'rate', 'role', 'swarm', 'room', 'git'];
-const segmentValues = [directorySegment, modelSegment, rateSegment, roleSegment, swarmSegment, roomSegment, gitSegment];
+const segments = [
+  { name: 'dir', value: directorySegment },
+  { name: 'model', value: modelSegment },
+  { name: 'rate', value: rateSegment },
+  { name: 'role', value: roleSegment },
+  { name: 'swarm', value: swarmSegment },
+  { name: 'room', value: roomSegment },
+  { name: 'git', value: gitSegment },
+];
+// On a swarm, promote the swarm pill to the leftmost position.
+if (swarmSegment) {
+  const swarmIndex = segments.findIndex((s) => s.name === 'swarm');
+  segments.unshift(segments.splice(swarmIndex, 1)[0]);
+}
+const segmentNames = segments.map((s) => s.name);
+const segmentValues = segments.map((s) => s.value);
 const segmentWidths = segmentValues.map(printableWidth);
 const segmentStripped = segmentValues.map(stripAnsi);
 
-let renderedLine = directorySegment;
+let renderedLine = segmentValues[0];
 let usedWidth = segmentWidths[0];
-const includedSegments = ['dir'];
+const includedSegments = [segmentNames[0]];
 const droppedSegments: string[] = [];
 const SEPARATOR_WIDTH = 1;
 for (let index = 1; index < segmentValues.length; index++) {
