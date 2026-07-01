@@ -32,10 +32,10 @@ const purpleBackground = '\x1b[48;2;187;154;247m';
 const purpleForeground = '\x1b[38;2;187;154;247m';
 const darkPurpleBackground = '\x1b[48;2;157;124;216m';
 const darkPurpleForeground = '\x1b[38;2;157;124;216m';
-const orangeBackground = '\x1b[48;2;255;158;100m';
-const orangeForeground = '\x1b[38;2;255;158;100m';
-const darkOrangeBackground = '\x1b[48;2;200;120;65m';
-const darkOrangeForeground = '\x1b[38;2;200;120;65m';
+const tealBackground = '\x1b[48;2;115;218;202m';
+const tealForeground = '\x1b[38;2;115;218;202m';
+const darkTealBackground = '\x1b[48;2;82;170;156m';
+const darkTealForeground = '\x1b[38;2;82;170;156m';
 const cyanBackground = '\x1b[48;2;86;207;235m';
 const cyanForeground = '\x1b[38;2;86;207;235m';
 const darkCyanBackground = '\x1b[48;2;60;158;180m';
@@ -231,7 +231,7 @@ const sevenDayRatePercent = Math.trunc(Number(session?.rate_limits?.seven_day?.u
 const currentDirectory = contractDirectory(workspaceDirectory);
 
 // ── Segment: model + context usage (always shown) ────────────────────
-const modelSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${brainIcon} ${modelName} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${memoryIcon} ${contextPercent}% ${reset}${darkYellowForeground}${pillRight}${reset}`;
+const modelSegment = `${tealForeground}${pillLeft}${tealBackground}${darkForeground} ${brainIcon} ${modelName} ${reset}${tealForeground}${darkTealBackground}${pillRight}${reset}${darkTealBackground}${darkForeground} ${memoryIcon} ${contextPercent}% ${reset}${darkTealForeground}${pillRight}${reset}`;
 
 // ── Segment: working directory ───────────────────────────────────────
 const directorySegment = `${blueForeground}${pillLeft}${blueBackground}${darkForeground} ${directoryIcon} ${currentDirectory} ${reset}${blueForeground}${pillRight}${reset}`;
@@ -280,7 +280,7 @@ if (swarmState) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const swarmIsAlive = swarmLastUpdated > 0 && nowSeconds - swarmLastUpdated < SWARM_STALENESS_SECONDS;
   if (swarmNickname && swarmName && swarmIsAlive) {
-    swarmSegment = `${orangeForeground}${pillLeft}${orangeBackground}${darkForeground} ${voiceIcon} ${swarmNickname} ${reset}${orangeForeground}${darkOrangeBackground}${pillRight}${reset}${darkOrangeBackground}${darkForeground} ${peopleIcon} ${swarmName} ${swarmPeerCount} ${reset}${darkOrangeForeground}${pillRight}${reset}`;
+    swarmSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${voiceIcon} ${swarmNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${peopleIcon} ${swarmName} ${swarmPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
   }
 }
 
