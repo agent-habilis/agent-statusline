@@ -50,6 +50,7 @@ const directoryIcon = '\u{f0256}';
 const branchIcon = '\u{f062c}';
 const gaugeIcon = '\u{f029a}';
 const gaugeLowIcon = '\u{f0298}';
+const beeIcon = '\u{f0fa1}';
 const beehiveIcon = '\u{f10ce}';
 const peopleIcon = '\u{f0849}';
 const roleIcon = '\u{f05b5}';
@@ -280,7 +281,7 @@ if (swarmState) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const swarmIsAlive = swarmLastUpdated > 0 && nowSeconds - swarmLastUpdated < SWARM_STALENESS_SECONDS;
   if (swarmNickname && swarmName && swarmIsAlive) {
-    swarmSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${accountIcon} ${swarmNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${beehiveIcon} ${swarmName} ${swarmPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
+    swarmSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${beeIcon} ${swarmNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${beehiveIcon} ${swarmName} ${swarmPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
   }
 }
 
