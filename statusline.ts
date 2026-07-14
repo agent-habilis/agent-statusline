@@ -7,7 +7,7 @@ import * as fs from 'node:fs';
 
 const HOME_DIRECTORY = process.env.HOME ?? '';
 
-// Mirrors $PPID: the Claude Code process that spawned this script. The swarm,
+// Mirrors $PPID: the Claude Code process that spawned this script. The square,
 // role, and room state files are keyed by it, so it must match the value those
 // integrations recorded.
 const claudeProcessId = String(process.ppid);
@@ -50,7 +50,7 @@ const directoryIcon = '\u{f0256}';
 const branchIcon = '\u{f062c}';
 const gaugeIcon = '\u{f029a}';
 const gaugeLowIcon = '\u{f0298}';
-const beehiveIcon = '\u{f10ce}';
+const chatIcon = '\u{f0ede}';
 const robotIcon = '\u{f167a}';
 const peopleIcon = '\u{f0849}';
 const roleIcon = '\u{f05b5}';
@@ -74,57 +74,66 @@ function readProcessField(field: string, processId: string): string {
   }
 }
 
-// Locate the swarm state file the daemon launched without `--state-file`
-// writes by default: `/tmp/agent-habilis/swarm/<swarm_prefix>/<nick>.state.json`.
-// The filename is keyed by swarm+nick, not by PID, so find THIS session's file
-// via the daemon process: the `ahsw` daemon is a descendant of the Claude Code
-// process and holds its socket + tracing log open beside the state file in that
-// same per-swarm directory (`<nick>.ipc.sock` / `<nick>.tracing.log`). Find the
-// daemon under our process tree, read an open name off `lsof`, and swap the
-// extension for `.state.json`. Best-effort: returns null if anything is missing
-// or the session is not in a swarm (and skips `lsof` entirely in that case).
-function findSwarmStatePath(processId: string): string | null {
+// The agent-square runtime base is a fixed function of the uid alone (matches
+// runtime_base() in agent-square's crates/agent-habilis-mesh/src/util/mod.rs),
+// so this render process computes the same path as the daemon regardless of
+// environment.
+const squareRuntimeBase = `/tmp/agent-square-${process.getuid?.() ?? ''}`;
+
+// Locate the square state file the daemon launched without `--state-file`
+// writes by default: `<squareRuntimeBase>/<square_prefix>/<nick>.state.json`.
+// The filename is keyed by square+nick, not by PID, so find THIS session's file
+// via the daemon process: the `agent-square` daemon is a descendant of the
+// Claude Code process and holds its socket + tracing log open beside the state
+// file in that same per-square directory (`<nick>.ipc.sock` /
+// `<nick>.tracing.log`). Find the daemon under our process tree, read an open
+// name off `lsof`, and swap the extension for `.state.json`. Best-effort:
+// returns null if anything is missing or the session is not in a square (and
+// skips `lsof` entirely in that case).
+function findSquareStatePath(processId: string): string | null {
   try {
     const psOutput = Bun.spawnSync(['ps', '-axo', 'pid=,ppid=,command='], { stderr: 'ignore' })
       .stdout.toString();
     const parentOf = new Map<string, string>();
-    const ahswPids: string[] = [];
+    const daemonPids: string[] = [];
     for (const line of psOutput.split('\n')) {
       const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
       if (!match) continue;
       const [, pid, ppid, command] = match;
       parentOf.set(pid, ppid);
-      if (/(^|\/)ahsw\s/.test(command)) ahswPids.push(pid);
+      if (/(^|\/)agent-square\s/.test(command)) daemonPids.push(pid);
     }
 
-    // An `ahsw` daemon is ours if the Claude Code process is an ancestor within
-    // a few hops (claude → zsh → ahsw). Walk each candidate's parent chain up.
-    let ahswPid = '';
-    for (const candidate of ahswPids) {
+    // An `agent-square` daemon is ours if the Claude Code process is an
+    // ancestor within a few hops (claude → zsh → agent-square). Walk each
+    // candidate's parent chain up.
+    let daemonPid = '';
+    for (const candidate of daemonPids) {
       let ancestor = candidate;
       for (let depth = 0; depth < 4 && ancestor; depth++) {
         ancestor = parentOf.get(ancestor) ?? '';
         if (ancestor === processId) {
-          ahswPid = candidate;
+          daemonPid = candidate;
           break;
         }
       }
-      if (ahswPid) break;
+      if (daemonPid) break;
     }
-    if (!ahswPid) return null;
+    if (!daemonPid) return null;
 
-    // The daemon holds its socket and tracing log open in the per-swarm
+    // The daemon holds its socket and tracing log open in the per-square
     // directory beside the state file, sharing the `<nick>` stem. `lsof -Fn`
     // prints each open name on an `n…` line; normalize macOS's `/private/tmp`
     // alias to `/tmp`, then derive the state file from the directory + stem.
-    const lsofOutput = Bun.spawnSync(['lsof', '-p', ahswPid, '-Fn'], { stderr: 'ignore' })
+    const lsofOutput = Bun.spawnSync(['lsof', '-p', daemonPid, '-Fn'], { stderr: 'ignore' })
       .stdout.toString();
+    const stateSiblingPattern = new RegExp(
+      `^(${squareRuntimeBase}/[^/]+)/(.+)\\.(?:ipc\\.sock|tracing\\.log)$`,
+    );
     for (const line of lsofOutput.split('\n')) {
       if (!line.startsWith('n')) continue;
       const name = line.slice(1).replace(/^\/private\/tmp\//, '/tmp/');
-      const match = name.match(
-        /^(\/tmp\/agent-habilis\/swarm\/[^/]+)\/(.+)\.(?:ipc\.sock|tracing\.log)$/,
-      );
+      const match = name.match(stateSiblingPattern);
       if (match) return `${match[1]}/${match[2]}.state.json`;
     }
     return null;
@@ -253,35 +262,39 @@ try {
   gitSegment = '';
 }
 
-// ── Segment: swarm membership ────────────────────────────────────────
-// The agent-habilis-swarm daemon is the sole writer of its state file; the
-// /swarm:* skills only read it. The daemon refreshes last_updated every
+// ── Segment: square membership ───────────────────────────────────────
+// The agent-square daemon is the sole writer of its state file; the /square:*
+// skills only read it. The daemon refreshes last_updated every
 // STATE_REFRESH_SECS (~10s) even when membership is unchanged, so a fresh
 // timestamp doubles as a liveness signal. The staleness window below is kept
-// at ~3x that cadence and is coupled to STATE_REFRESH_SECS in
-// agent-habilis-swarm's src/util/tuning.rs.
+// at ~3x that cadence and is coupled to STATE_REFRESH_SECS in agent-square's
+// crates/agent-habilis-mesh/src/util/tuning.rs.
 //
 // Two launch styles exist: a daemon started with `--state-file
-// .../sessions/${PPID}.json` writes that per-session path (cheap to read by
-// our own PPID), while one started without it writes a default
-// `.../<swarm_prefix>/<nick>.state.json`. Prefer the PPID file, then fall back
-// to locating the default file via the daemon process (findSwarmStatePath).
-const SWARM_STALENESS_SECONDS = 30;
-let swarmSegment = '';
-let swarmState = readJsonFile(`/tmp/agent-habilis/swarm/sessions/${claudeProcessId}.json`);
-if (!swarmState) {
-  const defaultPath = findSwarmStatePath(claudeProcessId);
-  if (defaultPath) swarmState = readJsonFile(defaultPath);
+// .../sessions/${PPID}.json` (what the skills do) writes that per-session path
+// (cheap to read by our own PPID), while one started without it writes a
+// default `.../<square_prefix>/<nick>.state.json`. Prefer the PPID file, then
+// fall back to locating the default file via the daemon process
+// (findSquareStatePath). `ready` is false until the daemon's event loop is
+// serving IPC; a pre-`ready` (old-binary) file omits the field, so only an
+// explicit false hides the pill.
+const SQUARE_STALENESS_SECONDS = 30;
+let squareSegment = '';
+let squareState = readJsonFile(`${squareRuntimeBase}/sessions/${claudeProcessId}.json`);
+if (!squareState) {
+  const defaultPath = findSquareStatePath(claudeProcessId);
+  if (defaultPath) squareState = readJsonFile(defaultPath);
 }
-if (swarmState) {
-  const swarmNickname = String(swarmState.nickname ?? '');
-  const swarmName = String(swarmState.name ?? '');
-  const swarmPeerCount = Number(swarmState.participant_count ?? 0);
-  const swarmLastUpdated = Number(swarmState.last_updated ?? 0);
+if (squareState) {
+  const squareNickname = String(squareState.nickname ?? '');
+  const squareName = String(squareState.name ?? '');
+  const squarePeerCount = Number(squareState.participant_count ?? 0);
+  const squareLastUpdated = Number(squareState.last_updated ?? 0);
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const swarmIsAlive = swarmLastUpdated > 0 && nowSeconds - swarmLastUpdated < SWARM_STALENESS_SECONDS;
-  if (swarmNickname && swarmName && swarmIsAlive) {
-    swarmSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} ${swarmNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${beehiveIcon} ${swarmName} ${swarmPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
+  const squareIsAlive =
+    squareLastUpdated > 0 && nowSeconds - squareLastUpdated < SQUARE_STALENESS_SECONDS;
+  if (squareNickname && squareName && squareIsAlive && squareState.ready !== false) {
+    squareSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} ${squareNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${chatIcon} ${squareName} ${squarePeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
   }
 }
 
@@ -399,14 +412,14 @@ const segments = [
   { name: 'model', value: modelSegment },
   { name: 'rate', value: rateSegment },
   { name: 'role', value: roleSegment },
-  { name: 'swarm', value: swarmSegment },
+  { name: 'square', value: squareSegment },
   { name: 'room', value: roomSegment },
   { name: 'git', value: gitSegment },
 ];
-// On a swarm, promote the swarm pill to the leftmost position.
-if (swarmSegment) {
-  const swarmIndex = segments.findIndex((s) => s.name === 'swarm');
-  segments.unshift(segments.splice(swarmIndex, 1)[0]);
+// On a square, promote the square pill to the leftmost position.
+if (squareSegment) {
+  const squareIndex = segments.findIndex((s) => s.name === 'square');
+  segments.unshift(segments.splice(squareIndex, 1)[0]);
 }
 const segmentNames = segments.map((s) => s.name);
 const segmentValues = segments.map((s) => s.value);
