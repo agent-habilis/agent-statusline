@@ -288,9 +288,6 @@ if (!gossipState) {
 if (gossipState) {
   const gossipNickname = String(gossipState.nickname ?? '');
   const gossipName = String(gossipState.name ?? '');
-  // The daemon writes `topic` only for topic sessions; a regular join-id
-  // session omits it and gets an IRC-style `#` on its name.
-  const gossipTopic = String(gossipState.topic ?? '');
   // The daemon renamed `participant_count` to `peer_count`; keep the old
   // name as a fallback for daemons still on the previous binary.
   const gossipPeerCount = Number(gossipState.peer_count ?? gossipState.participant_count ?? 0);
@@ -299,7 +296,7 @@ if (gossipState) {
   const gossipIsAlive =
     gossipLastUpdated > 0 && nowSeconds - gossipLastUpdated < GOSSIP_STALENESS_SECONDS;
   if (gossipNickname && gossipName && gossipIsAlive && gossipState.ready !== false) {
-    gossipSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} <${gossipNickname}> ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${chatIcon} ${gossipTopic ? gossipName : `#${gossipName}`} ${gossipPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
+    gossipSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} ${gossipNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${chatIcon} ${gossipName} ${gossipPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
   }
 }
 
@@ -408,13 +405,13 @@ if (!columns || !(availableColumns > 0)) {
 availableColumns = Math.max(availableColumns - GUTTER_COLUMNS, MINIMUM_COLUMNS);
 
 // ── Render: fit segments to the available width ──────────────────────
-// The directory segment is always shown first; the rest are appended greedily
+// The model segment is always shown first; the rest are appended greedily
 // and dropped once the next one would overflow. Widths count Unicode
 // codepoints after stripping ANSI, since Nerd Font / Powerline glyphs render
 // single-width in modern terminals.
 const segments = [
-  { name: 'dir', value: directorySegment },
   { name: 'model', value: modelSegment },
+  { name: 'dir', value: directorySegment },
   { name: 'rate', value: rateSegment },
   { name: 'role', value: roleSegment },
   { name: 'gossip', value: gossipSegment },
