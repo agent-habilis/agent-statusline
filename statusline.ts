@@ -291,7 +291,9 @@ if (gossipState) {
   // The daemon writes `topic` only for topic sessions; a regular join-id
   // session omits it and gets an IRC-style `#` on its name.
   const gossipTopic = String(gossipState.topic ?? '');
-  const gossipPeerCount = Number(gossipState.participant_count ?? 0);
+  // The daemon renamed `participant_count` to `peer_count`; keep the old
+  // name as a fallback for daemons still on the previous binary.
+  const gossipPeerCount = Number(gossipState.peer_count ?? gossipState.participant_count ?? 0);
   const gossipLastUpdated = Number(gossipState.last_updated ?? 0);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const gossipIsAlive =
