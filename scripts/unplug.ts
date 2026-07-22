@@ -1,15 +1,22 @@
 #!/usr/bin/env bun
-// unplug.ts — remove the statusline.ts symlink and the statusLine config
-// from ~/.claude/settings.json.
+// unplug.ts — remove the claude-statusline.ts symlink and the statusLine
+// config from ~/.claude/settings.json, and the pi extensions symlink.
 import * as fs from 'node:fs';
 
 const CLAUDE_DIR = `${process.env.HOME}/.claude`;
-const DST = `${CLAUDE_DIR}/statusline.ts`;
+const DST = `${CLAUDE_DIR}/claude-statusline.ts`;
 const SETTINGS = `${CLAUDE_DIR}/settings.json`;
+const PI_DST = `${process.env.HOME}/.pi/agent/extensions/statusline.ts`;
 
 // Remove the symlink (only if it is a symlink). Also clean up the legacy
-// statusline.sh symlink from before the Bun rewrite.
-for (const path of [DST, `${CLAUDE_DIR}/statusline.sh`]) {
+// statusline.sh symlink from before the Bun rewrite and the statusline.ts one
+// from before this script was renamed claude-statusline.ts.
+for (const path of [
+  DST,
+  `${CLAUDE_DIR}/statusline.sh`,
+  `${CLAUDE_DIR}/statusline.ts`,
+  PI_DST,
+]) {
   try {
     const stat = fs.lstatSync(path);
     if (stat.isSymbolicLink()) {
@@ -32,4 +39,4 @@ if (await file.exists()) {
   console.log(`Removed statusLine config from ${SETTINGS}`);
 }
 
-console.log('\nDone! Statusline has been removed.');
+console.log('\nDone! Statusline has been removed; run /reload in pi.');

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "A powerline-style statusline for Claude Code.",
+  "description": "Powerline-style statuslines for Claude Code, Cursor Agent CLI, and pi.",
   "scripts": {
     "plug": "bun run scripts/plug.ts",
     "unplug": "bun run scripts/unplug.ts"

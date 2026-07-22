@@ -79,7 +79,7 @@ function readJsonFile(path: string): any | null {
 // environment.
 const gossipRuntimeBase = `/tmp/agent-gossip-${process.getuid?.() ?? ''}`;
 
-// Locate this session's gossip state, mirroring statusline.ts but without
+// Locate this session's gossip state, mirroring claude-statusline.ts but without
 // trusting process.ppid: cursor-agent may spawn this script through a shell,
 // so the cursor-agent process is some ancestor, not necessarily the direct
 // parent. One `ps` pass gives both our ancestor chain and the daemon list.
@@ -180,7 +180,18 @@ try {
   session = {};
 }
 
-const modelName = String(session?.model?.display_name ?? session?.model?.id ?? '...');
+// Show the bare model name: `display_name` comes parameterized ("Cursor Grok
+// 4.5 High Fast"); drop the `param_summary` suffix when it matches, then any
+// leftover trailing parameter labels (effort, fast, thinking, context size).
+let modelName = String(session?.model?.display_name ?? session?.model?.id ?? '...');
+const paramSummary = String(session?.model?.param_summary ?? '');
+if (paramSummary && modelName.endsWith(` ${paramSummary}`)) {
+  modelName = modelName.slice(0, -(paramSummary.length + 1));
+}
+const parameterSuffixPattern = /\s+(?:High|Low|Medium|Fast|Thinking|Max|\d+(?:k|m))$/i;
+while (parameterSuffixPattern.test(modelName)) {
+  modelName = modelName.replace(parameterSuffixPattern, '');
+}
 const contextPercent = Math.trunc(Number(session?.context_window?.used_percentage ?? 0));
 // Input is estimated by the CLI (used% × window size); output is actual.
 const inputTokens = formatTokens(Number(session?.context_window?.total_input_tokens ?? 0));
