@@ -1,5 +1,5 @@
 {
-  "name": "@agent-habilis/claude-code-statusline",
+  "name": "@agent-habilis/agent-statusline",
   "version": "0.1.0",
   "type": "module",
   "private": true,

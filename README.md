@@ -1,4 +1,4 @@
-# claude-code-statusline
+# agent-statusline
 
 Powerline-style statuslines for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Cursor Agent CLI](https://cursor.com/docs/cli), and [pi](https://github.com/badlogic/pi-mono), sharing one look: Tokyo Night colors, rounded pills, Nerd Font icons.
 
