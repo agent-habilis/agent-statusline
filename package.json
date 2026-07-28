@@ -6,6 +6,7 @@
   "description": "Powerline-style statuslines for Claude Code, Cursor Agent CLI, and pi.",
   "scripts": {
     "plug": "bun run scripts/plug.ts",
-    "unplug": "bun run scripts/unplug.ts"
+    "unplug": "bun run scripts/unplug.ts",
+    "test": "bun test"
   }
 }

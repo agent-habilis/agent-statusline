@@ -233,7 +233,34 @@ try {
   session = {};
 }
 
-const modelName = String(session?.model?.display_name ?? '...').replace(/ \([^)]*context\)/, '');
+// With a custom endpoint (Bedrock, Vertex, a gateway), Claude Code can't map an
+// opaque model id back to a friendly name, so `display_name` arrives as the raw
+// ARN. The ANTHROPIC_DEFAULT_<TIER>_MODEL[_NAME] env pairs are the only place
+// that mapping exists, so rebuild it here.
+function resolveModelName(displayName: string, modelId: string): string {
+  const bare = (text: string) => text.replace(/\[[12]m\]/gi, '').trim();
+  // A resolved display name is short and human ("Opus 4.8"); anything carrying an
+  // ARN or a provider-qualified id means resolution fell through to the raw id.
+  if (!/^arn:/i.test(bare(displayName)) && !bare(displayName).includes('.')) return displayName;
+  for (const tier of ['OPUS', 'SONNET', 'HAIKU', 'FABLE']) {
+    const configured = process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL`];
+    const friendly = process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL_NAME`];
+    if (!configured || !friendly) continue;
+    if (bare(configured) === bare(modelId) || bare(configured) === bare(displayName)) {
+      return friendly;
+    }
+  }
+  // Unmapped: an ARN's trailing resource id still beats showing the whole ARN.
+  const stripped = bare(displayName);
+  return /^arn:/i.test(stripped) ? stripped.split('/').pop() || stripped : stripped;
+}
+
+const rawModelName = String(session?.model?.display_name ?? '...');
+const modelId = String(session?.model?.id ?? '');
+const modelIs1M = /\[1m\]/i.test(rawModelName) || /\[1m\]/i.test(modelId);
+const modelName =
+  resolveModelName(rawModelName, modelId).replace(/ \([^)]*context\)/, '') +
+  (modelIs1M ? ' 1M' : '');
 const contextPercent = Math.trunc(Number(session?.context_window?.used_percentage ?? 0));
 const workspaceDirectory = String(session?.workspace?.current_dir ?? '...');
 const fiveHourRatePercent = Math.trunc(Number(session?.rate_limits?.five_hour?.used_percentage ?? 0));
