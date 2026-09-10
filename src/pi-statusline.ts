@@ -20,15 +20,14 @@ const PILL_RIGHT = "\ue0b4"; // 
 // Icons (Nerd Font glyphs)
 const ICON_BRAIN = "\u{F01A7}"; // 󰆧
 const ICON_BOLT = "\u{F140C}"; // 󱐌 nf-md-lightning_bolt
-const ICON_DOMAIN = "\u{F167A}"; // 󱙺 (vendor — robot happy)
+const ICON_ROBOT = "\u{F167A}"; // 󱙺 robot happy
 const ICON_FOLDER = "\u{F0256}"; // 󰉖
 const ICON_CURRENCY = "\u{F0588}"; // 󰖈
 const ICON_ARROW_DOWN = "▽";
 const ICON_ARROW_UP = "△";
 const ICON_BRANCH = "\u{F062C}"; // 󰘬
 const ICON_MEMORY = "\u{F035B}"; // 󰍛
-const ICON_SWARM = "\u{F05CB}"; // 󰗋 nf-md-account-voice
-const ICON_PEERS = "\u{F0849}"; // 󰡉 nf-md-account-multiple-outline
+const ICON_CHAT = "\u{F0EDE}";
 
 // --- ANSI helpers ---
 const RESET = "\x1b[0m";
@@ -70,7 +69,7 @@ interface OpenRouterCredits {
 
 let credits: OpenRouterCredits | null = null;
 let fetchTimer: ReturnType<typeof setInterval> | null = null;
-let swarmTimer: ReturnType<typeof setInterval> | null = null;
+let gossipTimer: ReturnType<typeof setInterval> | null = null;
 
 async function fetchOpenRouterCredits(signal?: AbortSignal): Promise<OpenRouterCredits | null> {
 	const apiKey = process.env.OPENROUTER_API_KEY;
@@ -128,7 +127,7 @@ function truncate(str: string, maxLen: number): string {
 // ~3x that cadence (30s). `ready` stays false until the daemon serves IPC.
 const GOSSIP_RUNTIME_BASE = `/tmp/agent-gossip-${process.getuid?.() ?? ""}`;
 
-interface SwarmState {
+interface GossipState {
 	nickname?: string;
 	name?: string;
 	// The daemon renamed `participant_count` to `peer_count`; keep the old
@@ -141,10 +140,10 @@ interface SwarmState {
 	gossip?: string;
 }
 
-function readSwarmState(): SwarmState | null {
+function readGossipState(): GossipState | null {
 	try {
 		const raw = fs.readFileSync(`${GOSSIP_RUNTIME_BASE}/sessions/${process.pid}.json`, "utf8");
-		const s = JSON.parse(raw) as SwarmState;
+		const s = JSON.parse(raw) as GossipState;
 
 		const now = Math.floor(Date.now() / 1000);
 		if (!s.last_updated || now - s.last_updated >= 30) return null; // stale == daemon gone
@@ -158,41 +157,23 @@ function readSwarmState(): SwarmState | null {
 }
 
 // --- Segment builders ---
-function buildModelSegment(modelId: string): string {
-	const slash = modelId.indexOf("/");
-	if (slash === -1) {
-		const shortId = truncate(modelId, 32);
-		return `${ansiFg(YELLOW)}${PILL_LEFT}${ansiBg(YELLOW)}${DARK_FG} ${ICON_BRAIN} ${shortId} ${RESET}${ansiFg(YELLOW)}${PILL_RIGHT}${RESET}`;
-	}
+// Model + context usage in one pill, like the Claude Code statusline.
+// The vendor prefix ("moonshotai/") is dropped to match its short names.
+function buildModelSegment(ctx: ExtensionContext): string {
+	const modelId = ctx.model?.id || "unknown";
+	const name = truncate(modelId.slice(modelId.indexOf("/") + 1), 32);
 
-	const vendor = truncate(modelId.slice(0, slash), 12);
-	const name = truncate(modelId.slice(slash + 1), 24);
-
-	return (
-		`${ansiFg(YELLOW)}${PILL_LEFT}${ansiBg(YELLOW)}${DARK_FG} ${ICON_DOMAIN}  ${name} ${RESET}` +
-		`${ansiFg(YELLOW)}${ansiBg(DYELLOW)}${PILL_RIGHT}${RESET}${ansiBg(DYELLOW)}${DARK_FG} ${ICON_BRAIN} ${vendor} ${RESET}${ansiFg(DYELLOW)}${PILL_RIGHT}${RESET}`
-	);
-}
-
-function buildContextSegment(ctx: ExtensionContext): string | null {
 	const contextUsage = ctx.getContextUsage();
-	if (!contextUsage) return null;
+	const [base, dark] = contextUsage && contextUsage.percent > 90 ? [RED, DRED] : [TEAL, DTEAL];
+	const modelHalf = `${ansiFg(base)}${PILL_LEFT}${ansiBg(base)}${DARK_FG} ${ICON_BRAIN} ${name} ${RESET}`;
+	if (!contextUsage) return `${modelHalf}${ansiFg(base)}${PILL_RIGHT}${RESET}`;
 
 	const pct = contextUsage.percent;
-	const total = contextUsage.contextWindow;
-
-	// Dynamic color: shift to red/maroon at high usage
-	const isHigh = pct > 90;
-	const isWarn = pct > 70 && !isHigh;
-
-	const base = isHigh ? RED : isWarn ? { r: 255, g: 158, b: 100 } : ORANGE;
-	const dark = isHigh ? DRED : isWarn ? DORANGE : DORANGE;
-
 	const pctDisplay = pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1);
 
 	return (
-		`${ansiFg(base)}${PILL_LEFT}${ansiBg(base)}${DARK_FG} ${ICON_MEMORY} ${pctDisplay}% ${RESET}` +
-		`${ansiFg(base)}${ansiBg(dark)}${PILL_RIGHT}${RESET}${ansiBg(dark)}${DARK_FG} ${fmtNum(total)} ${RESET}${ansiFg(dark)}${PILL_RIGHT}${RESET}`
+		modelHalf +
+		`${ansiFg(base)}${ansiBg(dark)}${PILL_RIGHT}${RESET}${ansiBg(dark)}${DARK_FG} ${ICON_MEMORY} ${pctDisplay}% ${RESET}${ansiFg(dark)}${PILL_RIGHT}${RESET}`
 	);
 }
 
@@ -228,13 +209,13 @@ function buildSessionSegment(ctx: ExtensionContext): string {
 	}
 
 	return (
-		`${ansiFg(TEAL)}${PILL_LEFT}${ansiBg(TEAL)}${DARK_FG} ${ICON_ARROW_DOWN} ${fmtNum(inputTokens)} ${RESET}` +
-		`${ansiFg(TEAL)}${ansiBg(DTEAL)}${PILL_RIGHT}${RESET}${ansiBg(DTEAL)}${DARK_FG} ${ICON_ARROW_UP} ${fmtNum(outputTokens)} ${RESET}${ansiFg(DTEAL)}${PILL_RIGHT}${RESET}`
+		`${ansiFg(ORANGE)}${PILL_LEFT}${ansiBg(ORANGE)}${DARK_FG} ${ICON_ARROW_DOWN} ${fmtNum(inputTokens)} ${RESET}` +
+		`${ansiFg(ORANGE)}${ansiBg(DORANGE)}${PILL_RIGHT}${RESET}${ansiBg(DORANGE)}${DARK_FG} ${ICON_ARROW_UP} ${fmtNum(outputTokens)} ${RESET}${ansiFg(DORANGE)}${PILL_RIGHT}${RESET}`
 	);
 }
 
-function buildSwarmSegment(): string | null {
-	const s = readSwarmState();
+function buildGossipSegment(): string | null {
+	const s = readGossipState();
 	if (!s) return null;
 
 	const nick = truncate(s.nickname!, 20);
@@ -242,8 +223,8 @@ function buildSwarmSegment(): string | null {
 	const peers = s.peer_count ?? s.participant_count ?? 0;
 
 	return (
-		`${ansiFg(ORANGE)}${PILL_LEFT}${ansiBg(ORANGE)}${DARK_FG} ${ICON_SWARM} ${nick} ${RESET}` +
-		`${ansiFg(ORANGE)}${ansiBg(DORANGE)}${PILL_RIGHT}${RESET}${ansiBg(DORANGE)}${DARK_FG} ${ICON_PEERS} ${name} ${peers} ${RESET}${ansiFg(DORANGE)}${PILL_RIGHT}${RESET}`
+		`${ansiFg(YELLOW)}${PILL_LEFT}${ansiBg(YELLOW)}${DARK_FG} ${ICON_ROBOT} ${nick} ${RESET}` +
+		`${ansiFg(YELLOW)}${ansiBg(DYELLOW)}${PILL_RIGHT}${RESET}${ansiBg(DYELLOW)}${DARK_FG} ${ICON_CHAT} ${name} ${peers} ${RESET}${ansiFg(DYELLOW)}${PILL_RIGHT}${RESET}`
 	);
 }
 
@@ -297,25 +278,20 @@ export default function (pi: ExtensionAPI) {
 					// 3. Session tokens
 					segs.push(buildSessionSegment(ctx));
 
-					// 3b. Swarm (only when in a live agent-gossip session)
-					const swarmSeg = buildSwarmSegment();
-					if (swarmSeg) segs.push(swarmSeg);
+					// 3b. Gossip (only when in a live agent-gossip session)
+					const gossipSeg = buildGossipSegment();
+					if (gossipSeg) segs.push(gossipSeg);
 
 					// 4. Git branch
 					const branch = footerData.getGitBranch();
 					if (branch) segs.push(buildGitSegment(branch));
 
-					// 5. Model
-					const modelId = ctx.model?.id || "unknown";
-					segs.push(buildModelSegment(modelId));
+					// 5. Model + context usage
+					segs.push(buildModelSegment(ctx));
 
-					// 5b. Reasoning effort
+					// 6. Reasoning effort
 					const effortSeg = buildEffortSegment(pi);
 					if (effortSeg) segs.push(effortSeg);
-
-					// 6. Context usage
-					const ctxSeg = buildContextSegment(ctx);
-					if (ctxSeg) segs.push(ctxSeg);
 
 					// Drop whole segments from the right until the line fits.
 					// We never render a partial pill — half-rendered powerline
@@ -349,11 +325,11 @@ export default function (pi: ExtensionAPI) {
 			tuiRef?.requestRender();
 		}, 5 * 60 * 1000);
 
-		// The swarm pill reflects out-of-band daemon state, so the
+		// The gossip pill reflects out-of-band daemon state, so the
 		// footer must re-render on a timer to make it appear/expire
 		// without user interaction (daemon heartbeats every ~10s).
-		if (swarmTimer) clearInterval(swarmTimer);
-		swarmTimer = setInterval(() => tuiRef?.requestRender(), 5000);
+		if (gossipTimer) clearInterval(gossipTimer);
+		gossipTimer = setInterval(() => tuiRef?.requestRender(), 5000);
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
@@ -367,9 +343,9 @@ export default function (pi: ExtensionAPI) {
 			clearInterval(fetchTimer);
 			fetchTimer = null;
 		}
-		if (swarmTimer) {
-			clearInterval(swarmTimer);
-			swarmTimer = null;
+		if (gossipTimer) {
+			clearInterval(gossipTimer);
+			gossipTimer = null;
 		}
 	});
 }
