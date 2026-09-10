@@ -11,7 +11,6 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { visibleWidth } from "@mariozechner/pi-tui";
 import fs from "node:fs";
-import path from "node:path";
 
 // --- Nerd Font glyphs (powerline rounded) ---
 const PILL_LEFT = "\ue0b6"; // 
@@ -117,6 +116,31 @@ function truncate(str: string, maxLen: number): string {
 	return str.slice(0, Math.max(0, maxLen - 1)) + "…";
 }
 
+const HOME_DIRECTORY = process.env.HOME ?? "";
+
+// Fish-style contraction: every parent directory shrinks to its first
+// character (two for dotfiles, so `.config` stays distinguishable), while the
+// leaf keeps its full name.
+function contractDirectory(directory: string): string {
+	if (directory === "/") return directory;
+	if (directory === HOME_DIRECTORY) return "~";
+	const withHomeTilde =
+		HOME_DIRECTORY && directory.startsWith(`${HOME_DIRECTORY}/`)
+			? `~/${directory.slice(HOME_DIRECTORY.length + 1)}`
+			: directory;
+	const pathParts = withHomeTilde.split("/");
+	const lastIndex = pathParts.length - 1;
+	let contracted = "";
+	pathParts.forEach((pathPart, index) => {
+		let segment: string;
+		if (index === lastIndex || pathPart === "") segment = pathPart;
+		else if (/^\..+/.test(pathPart)) segment = pathPart.slice(0, 2);
+		else segment = pathPart.slice(0, 1);
+		contracted = index === 0 ? segment : `${contracted}/${segment}`;
+	});
+	return contracted;
+}
+
 // --- agent-gossip state ---
 // The agent-gossip daemon writes a per-session state file under its
 // uid-scoped runtime base at /tmp/agent-gossip-<uid>/sessions/<pid>.json,
@@ -178,7 +202,7 @@ function buildModelSegment(ctx: ExtensionContext): string {
 }
 
 function buildDirSegment(): string {
-	const dir = truncate(path.basename(process.cwd()), 24);
+	const dir = contractDirectory(process.cwd());
 
 	return `${ansiFg(BLUE)}${PILL_LEFT}${ansiBg(BLUE)}${DARK_FG} ${ICON_FOLDER} ${dir} ${RESET}${ansiFg(BLUE)}${PILL_RIGHT}${RESET}`;
 }
@@ -228,6 +252,7 @@ function buildGossipSegment(): string | null {
 	);
 }
 
+// Not in the footer at the moment; kept so it can be added back.
 function buildEffortSegment(pi: ExtensionAPI): string | null {
 	let level: string | undefined;
 	try {
@@ -268,30 +293,26 @@ export default function (pi: ExtensionAPI) {
 
 					const segs: string[] = [];
 
-					// 1. Directory
-					segs.push(buildDirSegment());
-
-					// 2. OpenRouter credits (only if available)
-					const creditsSeg = buildCreditsSegment();
-					if (creditsSeg) segs.push(creditsSeg);
-
-					// 3. Session tokens
-					segs.push(buildSessionSegment(ctx));
-
-					// 3b. Gossip (only when in a live agent-gossip session)
+					// 1. Gossip (only when in a live agent-gossip session)
 					const gossipSeg = buildGossipSegment();
 					if (gossipSeg) segs.push(gossipSeg);
+
+					// 2. Model + context usage
+					segs.push(buildModelSegment(ctx));
+
+					// 3. Directory
+					segs.push(buildDirSegment());
 
 					// 4. Git branch
 					const branch = footerData.getGitBranch();
 					if (branch) segs.push(buildGitSegment(branch));
 
-					// 5. Model + context usage
-					segs.push(buildModelSegment(ctx));
+					// 5. OpenRouter credits (only if available)
+					const creditsSeg = buildCreditsSegment();
+					if (creditsSeg) segs.push(creditsSeg);
 
-					// 6. Reasoning effort
-					const effortSeg = buildEffortSegment(pi);
-					if (effortSeg) segs.push(effortSeg);
+					// 6. Session tokens
+					segs.push(buildSessionSegment(ctx));
 
 					// Drop whole segments from the right until the line fits.
 					// We never render a partial pill — half-rendered powerline

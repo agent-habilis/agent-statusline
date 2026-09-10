@@ -8,7 +8,7 @@ Powerline-style statuslines for [Claude Code](https://docs.anthropic.com/en/docs
 | --- | --- | --- |
 | `src/claude-statusline.ts` | Claude Code | model + context, directory, rate limits, role, gossip, room, git |
 | `src/cursor-statusline.ts` | Cursor Agent CLI | gossip, model + context, session tokens, directory, git |
-| `src/pi-statusline.ts` | pi | directory, OpenRouter credits, session tokens, gossip, git, model, effort, context |
+| `src/pi-statusline.ts` | pi | gossip, model + context, directory, git, OpenRouter credits, session tokens |
 
 ## Prerequisites
 
