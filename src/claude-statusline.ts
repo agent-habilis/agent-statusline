@@ -42,6 +42,8 @@ const darkCyanBackground = '\x1b[48;2;60;158;180m';
 const darkCyanForeground = '\x1b[38;2;60;158;180m';
 const pinkBackground = '\x1b[48;2;243;139;168m';
 const pinkForeground = '\x1b[38;2;243;139;168m';
+const darkPinkBackground = '\x1b[48;2;194;111;134m';
+const darkPinkForeground = '\x1b[38;2;194;111;134m';
 
 // ── Nerd Font icons ──────────────────────────────────────────────────
 const brainIcon = '\u{f01a7}';
@@ -328,12 +330,19 @@ if (gossipState) {
 }
 
 // ── Segment: role ────────────────────────────────────────────────────
+// Written by `agent-graph node up <graph>/<node> --pid $PPID`.
 let roleSegment = '';
-const roleState = readJsonFile('/tmp/agent-role/state.json');
-if (roleState && claudeProcessId) {
-  const currentRole = String(roleState?.[claudeProcessId]?.role ?? '');
-  if (currentRole) {
-    roleSegment = `${pinkForeground}${pillLeft}${pinkBackground}${darkForeground} ${roleIcon} ${currentRole} ${reset}${pinkForeground}${pillRight}${reset}`;
+const nodeState = readJsonFile(`/tmp/agent-graph/${claudeProcessId}.json`);
+const currentNode = String(nodeState?.node ?? '');
+if (currentNode) {
+  const nodeIcon = String(nodeState?.node_icon ?? roleIcon);
+  const nodePill = `${pinkForeground}${pillLeft}${pinkBackground}${darkForeground} ${nodeIcon} ${currentNode} ${reset}`;
+  const currentGraph = String(nodeState?.graph ?? '');
+  if (currentGraph) {
+    const graphIcon = String(nodeState?.graph_icon ?? roleIcon);
+    roleSegment = `${nodePill}${pinkForeground}${darkPinkBackground}${pillRight}${reset}${darkPinkBackground}${darkForeground} ${graphIcon} ${currentGraph} ${reset}${darkPinkForeground}${pillRight}${reset}`;
+  } else {
+    roleSegment = `${nodePill}${pinkForeground}${pillRight}${reset}`;
   }
 }
 
@@ -445,11 +454,14 @@ const segments = [
   { name: 'room', value: roomSegment },
   { name: 'git', value: gitSegment },
 ];
-// In a gossip session, promote the gossip pill to the leftmost position.
-if (gossipSegment) {
-  const gossipIndex = segments.findIndex((s) => s.name === 'gossip');
-  segments.unshift(segments.splice(gossipIndex, 1)[0]);
+// Promote the gossip pill, then the node pill, so a node reads first and a
+// gossip reads right after it.
+function promoteSegment(name: string): void {
+  const index = segments.findIndex((s) => s.name === name);
+  segments.unshift(segments.splice(index, 1)[0]);
 }
+if (gossipSegment) promoteSegment('gossip');
+if (roleSegment) promoteSegment('role');
 const segmentNames = segments.map((s) => s.name);
 const segmentValues = segments.map((s) => s.value);
 const segmentWidths = segmentValues.map(printableWidth);

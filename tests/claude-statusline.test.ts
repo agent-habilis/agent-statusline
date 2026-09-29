@@ -4,6 +4,7 @@
 // ANTHROPIC_DEFAULT_* — inheriting the developer's own Bedrock config would make
 // these results depend on whose machine they run on.
 import { describe, expect, test } from 'bun:test';
+import * as fs from 'node:fs';
 
 const SCRIPT = new URL('../src/claude-statusline.ts', import.meta.url).pathname;
 
@@ -135,5 +136,75 @@ describe('fallbacks when no mapping is available', () => {
 
   test('survives an empty payload', () => {
     expect(modelNameOf({}, BEDROCK_ENV)).toBe('...');
+  });
+});
+
+describe('role segment', () => {
+  // The script keys the node file by its parent pid, which is this test process.
+  const stateFile = `/tmp/agent-graph/${process.pid}.json`;
+  const session = sessionWith({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' });
+
+  function renderWithNode(state: Record<string, unknown>): string {
+    fs.mkdirSync('/tmp/agent-graph', { recursive: true });
+    fs.writeFileSync(stateFile, JSON.stringify(state));
+    try {
+      return stripAnsi(render(session));
+    } finally {
+      fs.rmSync(stateFile);
+    }
+  }
+
+  test('shows the node and graph with their icons', () => {
+    const plain = renderWithNode({ pid: process.pid, node: 'worker', node_icon: 'N', graph: 'dev-team', graph_icon: 'G' });
+    expect(plain).toContain(` N worker ${pillRight} G dev-team ${pillRight}`);
+  });
+
+  test('shows only the node for a node outside a graph', () => {
+    const plain = renderWithNode({ pid: process.pid, node: 'solo', node_icon: 'N' });
+    expect(plain).toContain(` N solo ${pillRight}`);
+    expect(plain).not.toContain('undefined');
+  });
+});
+
+describe('segment order', () => {
+  test('puts the node pill first, then the gossip pill, then the model', () => {
+    const gossipFile = `/tmp/agent-gossip-${process.getuid!()}/sessions/${process.pid}.json`;
+    const nodeFile = `/tmp/agent-graph/${process.pid}.json`;
+    fs.mkdirSync(`/tmp/agent-gossip-${process.getuid!()}/sessions`, { recursive: true });
+    fs.mkdirSync('/tmp/agent-graph', { recursive: true });
+    fs.writeFileSync(
+      gossipFile,
+      JSON.stringify({ nickname: 'nick', name: 'room', peer_count: 2, ready: true, last_updated: Math.floor(Date.now() / 1000) }),
+    );
+    fs.writeFileSync(nodeFile, JSON.stringify({ node: 'worker', node_icon: 'R', graph: 'dev-team', graph_icon: 'P' }));
+    let plain: string;
+    try {
+      plain = stripAnsi(render(sessionWith({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' }), { STATUSLINE_DEBUG_COLS: '400' }));
+    } finally {
+      fs.rmSync(gossipFile);
+      fs.rmSync(nodeFile);
+    }
+    const gossipAt = plain.indexOf(' room 2 ');
+    const nodeAt = plain.indexOf(' R worker ');
+    const modelAt = plain.indexOf(`${brainIcon} Opus 5.5`);
+    expect(nodeAt).toBeGreaterThanOrEqual(0);
+    expect(gossipAt).toBeGreaterThan(nodeAt);
+    expect(modelAt).toBeGreaterThan(gossipAt);
+  });
+
+  test('puts the node pill first without a gossip', () => {
+    const nodeFile = `/tmp/agent-graph/${process.pid}.json`;
+    fs.mkdirSync('/tmp/agent-graph', { recursive: true });
+    fs.writeFileSync(nodeFile, JSON.stringify({ node: 'worker', node_icon: 'R' }));
+    let plain: string;
+    try {
+      plain = stripAnsi(render(sessionWith({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' }), { STATUSLINE_DEBUG_COLS: '400' }));
+    } finally {
+      fs.rmSync(nodeFile);
+    }
+    const nodeAt = plain.indexOf(' R worker ');
+    const modelAt = plain.indexOf(`${brainIcon} Opus 5.5`);
+    expect(nodeAt).toBeGreaterThanOrEqual(0);
+    expect(modelAt).toBeGreaterThan(nodeAt);
   });
 });
