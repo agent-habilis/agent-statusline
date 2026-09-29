@@ -219,6 +219,7 @@ function buildCreditsSegment(): string | null {
 	);
 }
 
+// Not in the footer at the moment; kept so it can be added back.
 function buildSessionSegment(ctx: ExtensionContext): string {
 	let inputTokens = 0;
 	let outputTokens = 0;
@@ -310,9 +311,6 @@ export default function (pi: ExtensionAPI) {
 					// 5. OpenRouter credits (only if available)
 					const creditsSeg = buildCreditsSegment();
 					if (creditsSeg) segs.push(creditsSeg);
-
-					// 6. Session tokens
-					segs.push(buildSessionSegment(ctx));
 
 					// Drop whole segments from the right until the line fits.
 					// We never render a partial pill — half-rendered powerline
