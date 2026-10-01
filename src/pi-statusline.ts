@@ -27,6 +27,8 @@ const ICON_ARROW_UP = "△";
 const ICON_BRANCH = "\u{F062C}"; // 󰘬
 const ICON_MEMORY = "\u{F035B}"; // 󰍛
 const ICON_CHAT = "\u{F0EDE}";
+const ICON_CLIPBOARD = "\u{F0192}"; // 󰆒 nf-md-clipboard_text
+const ICON_PLAY = "\u{F040A}"; // 󰐊 nf-md-play
 
 // --- ANSI helpers ---
 const RESET = "\x1b[0m";
@@ -266,6 +268,48 @@ function buildEffortSegment(pi: ExtensionAPI): string | null {
 	return `${ansiFg(MAGENTA)}${PILL_LEFT}${ansiBg(MAGENTA)}${DARK_FG} ${ICON_BOLT} ${level} ${RESET}${ansiFg(MAGENTA)}${PILL_RIGHT}${RESET}`;
 }
 
+// --- pi-plan state ---
+// The pi-plan extension persists {mode, steps} as a custom session entry
+// (customType "pi-plan") on every state change: toggle, plan extraction,
+// step completion. The latest entry on the current branch is the source of
+// truth — it survives session resume and is branch-aware.
+interface PlanStep {
+	step: number;
+	text: string;
+	completed: boolean;
+}
+
+interface PlanState {
+	mode: "normal" | "plan" | "execute";
+	steps: PlanStep[];
+}
+
+function readPlanState(ctx: ExtensionContext): PlanState | null {
+	const branch = ctx.sessionManager.getBranch();
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i] as { type: string; customType?: string; data?: PlanState };
+		if (entry.type === "custom" && entry.customType === "pi-plan") {
+			return entry.data ?? null;
+		}
+	}
+	return null;
+}
+
+// Pill only appears while pi-plan is doing something: read-only planning or
+// executing a plan. Normal mode (and pi-plan absent) renders nothing.
+function buildPlanSegment(ctx: ExtensionContext): string | null {
+	const state = readPlanState(ctx);
+	if (!state || state.mode === "normal") return null;
+
+	if (state.mode === "execute") {
+		const total = state.steps?.length ?? 0;
+		const label = total > 0 ? `exec ${state.steps.filter((s) => s.completed).length}/${total}` : "exec";
+		return `${ansiFg(ORANGE)}${PILL_LEFT}${ansiBg(ORANGE)}${DARK_FG} ${ICON_PLAY} ${label} ${RESET}${ansiFg(ORANGE)}${PILL_RIGHT}${RESET}`;
+	}
+
+	return `${ansiFg(ORANGE)}${PILL_LEFT}${ansiBg(ORANGE)}${DARK_FG} ${ICON_CLIPBOARD} plan ${RESET}${ansiFg(ORANGE)}${PILL_RIGHT}${RESET}`;
+}
+
 function buildGitSegment(branch: string): string {
 	const shortBranch = truncate(branch, 20);
 
@@ -294,21 +338,25 @@ export default function (pi: ExtensionAPI) {
 
 					const segs: string[] = [];
 
-					// 1. Gossip (only when in a live agent-gossip session)
+					// 1. Plan mode (pi-plan extension; hidden in normal mode)
+					const planSeg = buildPlanSegment(ctx);
+					if (planSeg) segs.push(planSeg);
+
+					// 2. Gossip (only when in a live agent-gossip session)
 					const gossipSeg = buildGossipSegment();
 					if (gossipSeg) segs.push(gossipSeg);
 
-					// 2. Model + context usage
+					// 3. Model + context usage
 					segs.push(buildModelSegment(ctx));
 
-					// 3. Directory
+					// 4. Directory
 					segs.push(buildDirSegment());
 
-					// 4. Git branch
+					// 5. Git branch
 					const branch = footerData.getGitBranch();
 					if (branch) segs.push(buildGitSegment(branch));
 
-					// 5. OpenRouter credits (only if available)
+					// 6. OpenRouter credits (only if available)
 					const creditsSeg = buildCreditsSegment();
 					if (creditsSeg) segs.push(creditsSeg);
 
