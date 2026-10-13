@@ -277,6 +277,26 @@ describe('role segment counts', () => {
   });
 });
 
+describe('gossip segment', () => {
+  const gossipFile = `/tmp/agent-gossip-${process.getuid!()}/sessions/${process.pid}.json`;
+
+  test('shows the nickname in angle brackets and the room with a #', () => {
+    fs.mkdirSync(`/tmp/agent-gossip-${process.getuid!()}/sessions`, { recursive: true });
+    fs.writeFileSync(
+      gossipFile,
+      JSON.stringify({ nickname: 'nick', name: 'room', peer_count: 2, ready: true, last_updated: Math.floor(Date.now() / 1000) }),
+    );
+    let plain: string;
+    try {
+      plain = stripAnsi(render(sessionWith({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' }), { STATUSLINE_DEBUG_COLS: '400' }));
+    } finally {
+      fs.rmSync(gossipFile);
+    }
+    expect(plain).toContain(' <nick> ');
+    expect(plain).toContain(' #room 2 ');
+  });
+});
+
 describe('segment order', () => {
   test('puts the node pill first, then the gossip pill, then the model', () => {
     const gossipFile = `/tmp/agent-gossip-${process.getuid!()}/sessions/${process.pid}.json`;
@@ -295,7 +315,7 @@ describe('segment order', () => {
       fs.rmSync(gossipFile);
       fs.rmSync(nodeFile);
     }
-    const gossipAt = plain.indexOf(' room 2 ');
+    const gossipAt = plain.indexOf(' #room 2 ');
     const nodeAt = plain.indexOf(' R worker ');
     const modelAt = plain.indexOf(`${brainIcon} Opus 5.5`);
     expect(nodeAt).toBeGreaterThanOrEqual(0);

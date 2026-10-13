@@ -250,8 +250,8 @@ function buildGossipSegment(): string | null {
 	const peers = s.peer_count ?? s.participant_count ?? 0;
 
 	return (
-		`${ansiFg(YELLOW)}${PILL_LEFT}${ansiBg(YELLOW)}${DARK_FG} ${ICON_ROBOT} ${nick} ${RESET}` +
-		`${ansiFg(YELLOW)}${ansiBg(DYELLOW)}${PILL_RIGHT}${RESET}${ansiBg(DYELLOW)}${DARK_FG} ${ICON_CHAT} ${name} ${peers} ${RESET}${ansiFg(DYELLOW)}${PILL_RIGHT}${RESET}`
+		`${ansiFg(YELLOW)}${PILL_LEFT}${ansiBg(YELLOW)}${DARK_FG} ${ICON_ROBOT} <${nick}> ${RESET}` +
+		`${ansiFg(YELLOW)}${ansiBg(DYELLOW)}${PILL_RIGHT}${RESET}${ansiBg(DYELLOW)}${DARK_FG} ${ICON_CHAT} #${name} ${peers} ${RESET}${ansiFg(DYELLOW)}${PILL_RIGHT}${RESET}`
 	);
 }
 

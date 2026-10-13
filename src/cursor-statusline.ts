@@ -250,7 +250,7 @@ if (gossipState) {
   const gossipIsAlive =
     gossipLastUpdated > 0 && nowSeconds - gossipLastUpdated < GOSSIP_STALENESS_SECONDS;
   if (gossipNickname && gossipName && gossipIsAlive && gossipState.ready !== false) {
-    gossipSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} ${gossipNickname} ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${chatIcon} ${gossipName} ${gossipPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
+    gossipSegment = `${yellowForeground}${pillLeft}${yellowBackground}${darkForeground} ${robotIcon} <${gossipNickname}> ${reset}${yellowForeground}${darkYellowBackground}${pillRight}${reset}${darkYellowBackground}${darkForeground} ${chatIcon} #${gossipName} ${gossipPeerCount} ${reset}${darkYellowForeground}${pillRight}${reset}`;
   }
 }
 
