@@ -151,10 +151,11 @@ function findGossipStatePath(processId: string): string | null {
 // renders per second during streaming, so the result is cached per room+pid
 // for ROOM_COUNT_TTL_SECONDS and the cache file is read on the hot path.
 const ROOM_COUNT_TTL_SECONDS = 2;
+const STATUSLINE_CACHE_DIRECTORY = '/tmp/statusline-cache';
 const SESSION_STATE_SCRIPT =
   '/Users/caiogondim/Developer/upgrade/llm-context/plugins/room/src/session-state.js';
 function readRoomMemberCount(roomName: string, roomRoot: string): number {
-  const cacheDirectory = '/tmp/statusline-cache';
+  const cacheDirectory = STATUSLINE_CACHE_DIRECTORY;
   const cacheFile = `${cacheDirectory}/room-${claudeProcessId}.count`;
   try {
     const cacheAgeSeconds = (Date.now() - fs.statSync(cacheFile).mtimeMs) / 1000;
@@ -198,6 +199,64 @@ function readRoomMemberCount(roomName: string, roomRoot: string): number {
     // Best-effort cache write; never let it break the statusline.
   }
   return memberCount;
+}
+
+// The gossip meta document holds the node of every peer; the per-pid state file
+// holds only this agent's own. `agent-gossip meta get` is a process spawn, so
+// the result is cached like the room count above.
+type GraphCounts = { nodePosition: number; nodeCount: number; graphCount: number };
+function readGraphCounts(gossipId: string, nickname: string): GraphCounts | null {
+  const cacheDirectory = STATUSLINE_CACHE_DIRECTORY;
+  const cacheFile = `${cacheDirectory}/graph-${claudeProcessId}.json`;
+  try {
+    const cacheAgeSeconds = (Date.now() - fs.statSync(cacheFile).mtimeMs) / 1000;
+    if (cacheAgeSeconds < ROOM_COUNT_TTL_SECONDS) return readJsonFile(cacheFile);
+  } catch {
+    // No usable cache; fall through to a fresh read.
+  }
+
+  let counts: GraphCounts | null = null;
+  try {
+    const result = Bun.spawnSync(
+      ['agent-gossip', 'meta', 'get', '--gossip', gossipId, '--nickname', nickname],
+      { stderr: 'ignore' },
+    );
+    const meta = JSON.parse(result.stdout.toString());
+    const peers: Record<string, any> = meta?.document?.peers ?? {};
+    const absent = new Set<string>(meta?.absent ?? []);
+    const own = peers[nickname];
+    if (own?.instance && own?.hash && own?.node) {
+      // The position is a rank, so it has no holes when a peer leaves. A
+      // peer that has no `joined_at` (an older skill) sorts after the others.
+      const joinedAt = (peer: any) => Number(peer.joined_at ?? Infinity);
+      const ownJoinedAt = joinedAt(own);
+      let nodePosition = 1;
+      let nodeCount = 0;
+      let graphCount = 0;
+      for (const [peerNickname, peer] of Object.entries<any>(peers)) {
+        if (absent.has(peerNickname) || !peer?.node) continue;
+        if (peer.instance !== own.instance || peer.hash !== own.hash) continue;
+        graphCount++;
+        if (peer.node !== own.node) continue;
+        nodeCount++;
+        const peerJoinedAt = joinedAt(peer);
+        if (peerJoinedAt < ownJoinedAt || (peerJoinedAt === ownJoinedAt && peerNickname < nickname)) {
+          nodePosition++;
+        }
+      }
+      counts = { nodePosition, nodeCount, graphCount };
+    }
+  } catch {
+    // No usable meta (command missing or failed); render without counts.
+  }
+
+  try {
+    fs.mkdirSync(cacheDirectory, { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify(counts));
+  } catch {
+    // Best-effort cache write; never let it break the statusline.
+  }
+  return counts;
 }
 
 // Fish-style contraction: every parent directory shrinks to its first
@@ -336,11 +395,20 @@ const nodeState = readJsonFile(`/tmp/agent-graph/${claudeProcessId}.json`);
 const currentNode = String(nodeState?.node ?? '');
 if (currentNode) {
   const nodeIcon = String(nodeState?.node_icon ?? roleIcon);
-  const nodePill = `${pinkForeground}${pillLeft}${pinkBackground}${darkForeground} ${nodeIcon} ${currentNode} ${reset}`;
+  const graphNickname = String(gossipState?.nickname ?? '');
+  const graphGossipId = String(gossipState?.gossip ?? '');
+  const graphCounts =
+    graphNickname && graphGossipId ? readGraphCounts(graphGossipId, graphNickname) : null;
+  const nodeCountSuffix =
+    graphCounts && graphCounts.nodeCount > 1
+      ? ` ${graphCounts.nodePosition}/${graphCounts.nodeCount}`
+      : '';
+  const graphCountSuffix = graphCounts ? ` ${graphCounts.graphCount}` : '';
+  const nodePill = `${pinkForeground}${pillLeft}${pinkBackground}${darkForeground} ${nodeIcon} ${currentNode}${nodeCountSuffix} ${reset}`;
   const currentGraph = String(nodeState?.graph ?? '');
   if (currentGraph) {
     const graphIcon = String(nodeState?.graph_icon ?? roleIcon);
-    roleSegment = `${nodePill}${pinkForeground}${darkPinkBackground}${pillRight}${reset}${darkPinkBackground}${darkForeground} ${graphIcon} ${currentGraph} ${reset}${darkPinkForeground}${pillRight}${reset}`;
+    roleSegment = `${nodePill}${pinkForeground}${darkPinkBackground}${pillRight}${reset}${darkPinkBackground}${darkForeground} ${graphIcon} ${currentGraph}${graphCountSuffix} ${reset}${darkPinkForeground}${pillRight}${reset}`;
   } else {
     roleSegment = `${nodePill}${pinkForeground}${pillRight}${reset}`;
   }

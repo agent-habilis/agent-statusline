@@ -166,6 +166,117 @@ describe('role segment', () => {
   });
 });
 
+describe('role segment counts', () => {
+  // Keyed by the parent pid of the script, which is this test process.
+  const gossipDir = `/tmp/agent-gossip-${process.getuid!()}/sessions`;
+  const gossipFile = `${gossipDir}/${process.pid}.json`;
+  const nodeFile = `/tmp/agent-graph/${process.pid}.json`;
+  const cacheFile = `/tmp/statusline-cache/graph-${process.pid}.json`;
+  const session = sessionWith({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' });
+  const gossipId = 'FD4qwgQxZTV7s8nfLVGA98pFjtWUr3jV9MFk1A8QxH7gK2ZsoQJnx5ZZTrHksxB2nt';
+  const inGraph = (node: string, joinedAt?: number) => ({
+    instance: 'i1',
+    graph: 'squad',
+    hash: 'h1',
+    node,
+    ...(joinedAt === undefined ? {} : { joined_at: joinedAt }),
+  });
+  const withPeers = (peers: Record<string, unknown>, absent: string[] = []) =>
+    renderWithMeta({ ok: true, document: { peers }, absent });
+
+  function renderWithMeta(meta: unknown | null): string {
+    const binDir = fs.mkdtempSync('/tmp/fake-agent-gossip-');
+    const metaFile = `${binDir}/meta.json`;
+    fs.writeFileSync(metaFile, JSON.stringify(meta));
+    // Like the real binary, reject a gossip that is not the id (the name is not valid).
+    const body = meta === null ? 'exit 1' : `[ "$4" = "${gossipId}" ] || exit 1\ncat ${metaFile}`;
+    fs.writeFileSync(`${binDir}/agent-gossip`, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    fs.mkdirSync(gossipDir, { recursive: true });
+    fs.mkdirSync('/tmp/agent-graph', { recursive: true });
+    fs.writeFileSync(
+      gossipFile,
+      JSON.stringify({ gossip: gossipId, nickname: 'me', name: 'fin-lion', peer_count: 3, ready: true, last_updated: Math.floor(Date.now() / 1000) }),
+    );
+    fs.writeFileSync(nodeFile, JSON.stringify({ node: 'worker', node_icon: 'N', graph: 'squad', graph_icon: 'G' }));
+    try {
+      return stripAnsi(render(session, { PATH: `${binDir}:${process.env.PATH}`, STATUSLINE_DEBUG_COLS: '400' }));
+    } finally {
+      fs.rmSync(binDir, { recursive: true });
+      fs.rmSync(gossipFile);
+      fs.rmSync(nodeFile);
+      fs.rmSync(cacheFile, { force: true });
+    }
+  }
+
+  test('counts the agents in the same node and the peers of the graph', () => {
+    const plain = withPeers({ me: inGraph('worker'), a: inGraph('advisor'), b: inGraph('advisor') });
+    expect(plain).toContain(` N worker ${pillRight} G squad 3 ${pillRight}`);
+  });
+
+  test('does not count a peer that is absent', () => {
+    const plain = withPeers(
+      { me: inGraph('worker'), a: inGraph('worker'), b: inGraph('advisor') },
+      ['a'],
+    );
+    expect(plain).toContain(` N worker ${pillRight} G squad 2 ${pillRight}`);
+  });
+
+  test('does not count a peer of another graph', () => {
+    const plain = withPeers({ me: inGraph('worker'), a: { ...inGraph('worker'), hash: 'h2' } });
+    expect(plain).toContain(` N worker ${pillRight} G squad 1 ${pillRight}`);
+  });
+
+  test('shows the position of this peer when the node has more than one peer', () => {
+    const plain = withPeers({
+      me: inGraph('worker', 20),
+      a: inGraph('worker', 10),
+      b: inGraph('worker', 30),
+    });
+    expect(plain).toContain(` N worker 2/3 ${pillRight} G squad 3 ${pillRight}`);
+  });
+
+  test('closes the hole when a peer before this peer leaves', () => {
+    const plain = withPeers(
+      { me: inGraph('worker', 30), a: inGraph('worker', 10), b: inGraph('worker', 20) },
+      ['b'],
+    );
+    expect(plain).toContain(` N worker 2/2 ${pillRight} G squad 2 ${pillRight}`);
+  });
+
+  test('keeps the position when a new peer joins', () => {
+    const plain = withPeers({
+      me: inGraph('worker', 20),
+      a: inGraph('worker', 10),
+      b: inGraph('worker', 30),
+      c: inGraph('worker', 40),
+    });
+    expect(plain).toContain(` N worker 2/4 ${pillRight}`);
+  });
+
+  test('orders peers with the same join time by nickname', () => {
+    const first = withPeers({ me: inGraph('worker', 10), zed: inGraph('worker', 10) });
+    expect(first).toContain(` N worker 1/2 ${pillRight}`);
+    const second = withPeers({ me: inGraph('worker', 10), ann: inGraph('worker', 10) });
+    expect(second).toContain(` N worker 2/2 ${pillRight}`);
+  });
+
+  test('puts a peer without a join time after the peers with one', () => {
+    const plain = withPeers({ me: inGraph('worker'), a: inGraph('worker', 10) });
+    expect(plain).toContain(` N worker 2/2 ${pillRight}`);
+  });
+
+  test('shows no count for a node with one peer', () => {
+    const plain = withPeers({ me: inGraph('worker', 10), a: inGraph('advisor', 20) });
+    expect(plain).toContain(` N worker ${pillRight}`);
+    expect(plain).not.toContain('1/1');
+  });
+
+  test('shows no numbers when agent-gossip fails', () => {
+    const plain = renderWithMeta(null);
+    expect(plain).toContain(` N worker ${pillRight} G squad ${pillRight}`);
+  });
+});
+
 describe('segment order', () => {
   test('puts the node pill first, then the gossip pill, then the model', () => {
     const gossipFile = `/tmp/agent-gossip-${process.getuid!()}/sessions/${process.pid}.json`;
